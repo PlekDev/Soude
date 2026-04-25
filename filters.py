@@ -30,7 +30,7 @@ def build_notch_sos(
     return tf2sos(b, a)
 
 
-def build_mu_beta_bandpass_sos(
+def build_passthought_sos(
     low: float = 8.0,
     high: float = 30.0,
     order: int = 4,
@@ -54,7 +54,7 @@ def build_p300_chain(
 def build_mu_beta_chain(notch_freq: float = 60.0) -> list[np.ndarray]:
     return [
         build_notch_sos(freq=notch_freq),
-        build_mu_beta_bandpass_sos(),
+        build_passthought_sos(),
     ]
 
 # Aplicacion

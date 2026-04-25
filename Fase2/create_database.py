@@ -1,6 +1,7 @@
 import os
 import sys
 
+# 1. Agregamos la ruta principal del proyecto
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if root not in sys.path:
     sys.path.append(root)
@@ -8,10 +9,11 @@ if root not in sys.path:
 import time
 import numpy as np
 import pandas as pd
-from scipy import signal
 from dotenv import load_dotenv
-from brain_engine import BrainEngine
-from filters import build_passthought_sos
+
+# Importaciones limpias utilizando tus constantes y funciones globales
+from brain_engine import BrainEngine, CH_C3, CH_C4, SAMPLE_RATE
+from filters import build_mu_beta_chain, apply_filter_chain
 
 # 1. Load configuration from .env file
 load_dotenv()
@@ -19,11 +21,16 @@ SERIAL_REAL = os.environ.get("UNICORN_SERIAL")
 
 if not SERIAL_REAL:
     print("❌ ERROR: UNICORN_SERIAL not found in .env file")
-    exit()
+    sys.exit(1)
 
 # 2. Processing Configuration
-# Passthought Filter (8-30 Hz) to detect Mu/Beta rhythm
-sos_pt = build_passthought_sos()
+WINDOW_SECONDS = 2
+SAMPLES_PER_WINDOW = int(WINDOW_SECONDS * SAMPLE_RATE)
+NUM_WINDOWS = 15
+STATES = ['Rest', 'Passthought']
+
+# Usamos la cadena de filtros completa: Notch (60Hz) + Passthought (8-30 Hz)
+filter_chain = build_mu_beta_chain()
 
 def collect_data():
     engine = BrainEngine(serial=SERIAL_REAL)
@@ -34,34 +41,40 @@ def collect_data():
         engine.start()
         print("✅ Connection established. RingBuffer is active.")
 
-        # Define training labels in English
-        for state in ['Rest', 'Passthought']:
+        for state in STATES:
             print(f"\n{'='*40}")
             print(f" CURRENT PHASE: {state.upper()}")
             print(f"{'='*40}")
             print("Get ready... recording starts in 3 seconds.")
             time.sleep(3)
 
-            print(f"🔴 Recording 30 seconds of {state}...")
-            # Capture fifteen 2-second windows
-            for i in range(15):
-                time.sleep(2)
-                
-                # Read the last 2 seconds (500 samples) from the centralized buffer
-                raw = engine.buffer.read_from(engine.buffer.total_written - 500, 500)
+            print(f"🔴 Recording {NUM_WINDOWS * WINDOW_SECONDS} seconds of {state}...")
+            
+            # Anclamos el puntero al índice actual del buffer
+            last_read_index = engine.buffer.total_written
+            
+            for i in range(NUM_WINDOWS):
+                # Esperamos de forma inteligente hasta que el buffer tenga los 500 samples exactos
+                target_index = last_read_index + SAMPLES_PER_WINDOW
+                while engine.buffer.total_written < target_index:
+                    time.sleep(0.05) # Pausa corta para no saturar el CPU
+                    
+                # Leemos la ventana de datos exacta sin perder ni repetir frames
+                raw = engine.buffer.read_from(last_read_index, SAMPLES_PER_WINDOW)
+                last_read_index += SAMPLES_PER_WINDOW
                 
                 if raw is not None:
-                    # Apply Second-Order Section (SOS) filter
-                    filtered_data = signal.sosfilt(sos_pt, raw, axis=0)
+                    # Aplicar la cadena de filtros (Notch -> Mu/Beta)
+                    filtered_data = apply_filter_chain(raw, filter_chain)
                     
-                    # Extract variance from C3 (index 1) and C4 (index 3) based on brain_engine map
-                    e3 = np.var(filtered_data[:, 1])
-                    e4 = np.var(filtered_data[:, 3])
+                    # Extraer varianza usando las constantes legibles (CH_C3, CH_C4)
+                    e3 = np.var(filtered_data[:, CH_C3])
+                    e4 = np.var(filtered_data[:, CH_C4])
                     
                     dataset.append([e3, e4, state])
-                    print(f"   [OK] Sample {i+1}/15 | Var C3: {e3:.2f} | Var C4: {e4:.2f}")
+                    print(f"   [OK] Sample {i+1:02d}/{NUM_WINDOWS} | Var C3: {e3:7.2f} | Var C4: {e4:7.2f}")
                 else:
-                    print("   [!] Error: Buffer does not have enough data yet.")
+                    print(f"   [!] Error: Buffer overrun/underrun on sample {i+1}.")
 
     except Exception as e:
         print(f"❌ Critical error: {e}")
@@ -71,6 +84,9 @@ def collect_data():
         
         if dataset:
             df = pd.DataFrame(dataset, columns=['Variance_C3', 'Variance_C4', 'Class'])
+            
+            # Aseguramos que el directorio Fase2 exista por si acaso
+            os.makedirs('Fase2', exist_ok=True)
             df.to_csv('Fase2/dataset_phase2.csv', index=False)
             print(f"\n🏁 DONE! 'dataset_phase2.csv' generated with {len(df)} samples.")
 

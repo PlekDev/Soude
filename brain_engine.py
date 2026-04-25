@@ -24,14 +24,25 @@ BUFFER_SECONDS = 120       # Ring buffer duration — must exceed full paradigm 
 BUFFER_SAMPLES = SAMPLE_RATE * BUFFER_SECONDS
 
 # Channel indices (0-based) matching Unicorn Hybrid Black layout
-CH_FZ  = 0
-CH_C3  = 1
-CH_CZ  = 2
-CH_C4  = 3
-CH_PZ  = 4
-CH_PO7 = 5
-CH_OZ  = 6
-CH_PO8 = 7
+CH_1_FZ  = 0
+CH_2_C3  = 1
+CH_3_CZ  = 2
+CH_4_C4  = 3
+CH_5_PZ  = 4
+CH_6_PO7 = 5
+CH_7_OZ  = 6
+CH_8_PO8 = 7
+
+# Alias para mantener la compatibilidad con el resto del proyecto 
+# (Así no tienes que cambiar los otros archivos)
+CH_FZ  = CH_1_FZ
+CH_C3  = CH_2_C3
+CH_CZ  = CH_3_CZ
+CH_C4  = CH_4_C4
+CH_PZ  = CH_5_PZ
+CH_PO7 = CH_6_PO7
+CH_OZ  = CH_7_OZ
+CH_PO8 = CH_8_PO8
 
 # Channels used for P300 detection (centroparietal focus)
 P300_CHANNELS = [CH_CZ, CH_PZ, CH_OZ]

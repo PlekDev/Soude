@@ -2,9 +2,9 @@
 
 > **Your password is in your head. Literally.**
 
-Neuro-Lock is a **P300 ERP-based password manager** that authenticates users with their own brainwaves using the [g.tec Unicorn Hybrid Black](https://www.unicorn-bi.com/) EEG headset. There is no keyboard, no mouse, no passphrase to type — just a brief 14-second brain scan that unlocks your credential vault.
+Neuro-Lock is a **P300 ERP-based password manager** that authenticates users with their own brainwaves using the [g.tec Unicorn Hybrid Black](https://www.unicorn-bi.com/) EEG headset. There is no keyboard, no mouse, no passphrase to type — just a brief brain scan that unlocks your credential vault.
 
-Built in 36 hours for the **Br41n.IO Hackathon**.
+Built for the **Br41n.IO Hackathon** by team **SOUDE**.
 
 ---
 
@@ -188,23 +188,26 @@ All 5 stages should pass in ~20 seconds.
 
 All key parameters are documented in-file. The most important ones to tune when using real hardware:
 
-### `signal_processing.py`
+### `Fase1/signal_processing.py`
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `AUTH_THRESHOLD_UV` | `1.5 µV` | Minimum ΔP300 for GRANT. Increase if false accepts occur. |
-| `MIN_EPOCHS` | `3` | Min epochs per class. Lower to `2` if artifact rejection is aggressive. |
+| `AUTH_THRESHOLD_UV` | `0.8 µV` | Minimum ΔP300 for GRANT. Increase if false accepts occur. |
+| `MIN_EPOCHS` | `2` | Min epochs per class required for a valid decision. |
 | `EPOCH_DURATION_S` | `0.800 s` | Post-stimulus window. Keep at 800 ms — captures full P300. |
 | `P300_ONSET_S` | `0.250 s` | Start of P300 detection window. |
 | `P300_OFFSET_S` | `0.500 s` | End of P300 detection window. |
 
-### `stimulus_runner.py`
+### `Fase1/stimulus_runner.py`
 
 | Parameter | Default | Effect |
 |---|---|---|
 | `TARGET_REPEATS` | `5` | Repetitions per password image. More = better SNR, longer scan. |
-| `SOA_S` | `0.400 s` | Stimulus Onset Asynchrony. Do not lower below 350 ms. |
-| `NONTARGET_REPEATS` | `1` | Repetitions for non-password images. |
+| `NONTARGET_REPEATS` | `5` | Repetitions per non-target. Must equal TARGET_REPEATS to keep target rate at 15%. |
+| `SOA_S` | `0.500 s` | Stimulus Onset Asynchrony. Do not lower below 400 ms. |
+| `BLANK_S` | `0.075 s` | Inter-stimulus blank interval. |
+
+> **Total scan duration:** 100 events × 0.575 s ≈ **57 seconds**
 
 ### `brain_engine.py`
 
@@ -212,7 +215,7 @@ All key parameters are documented in-file. The most important ones to tune when 
 |---|---|---|
 | `SAMPLE_RATE` | `250 Hz` | Unicorn Hybrid Black native rate. Do not change. |
 | `N_CHANNELS` | `8` | EEG channels (Fz, C3, Cz, C4, Pz, PO7, Oz, PO8). |
-| `BUFFER_SECONDS` | `5 s` | Ring buffer duration. Covers one full paradigm run. |
+| `BUFFER_SECONDS` | `120 s` | Ring buffer — must exceed paradigm + enrollment time (~1.9 MB, negligible). |
 | `GETDATA_BLOCK` | `4 samples` | Pull size (~16 ms latency). Reduce to 1 for minimum latency. |
 
 ---
@@ -279,18 +282,18 @@ logs/20260425_022022/
 
 ---
 
-## Demo Script (3 minutes)
+## Demo Script (~5 minutes)
 
 | Time | Action |
 |---|---|
 | 0:00 | Put on EEG headset; explain P300 in one sentence |
-| 0:30 | Show enrollment: user secretly picks 3 images as password |
-| 1:00 | Hit **BEGIN NEURAL SCAN** — images flash for 14 s |
-| 1:15 | ERP monitor shows green waveform peaking at ~300 ms |
-| 1:30 | **ACCESS GRANTED** → **OPEN VAULT** → passwords appear |
-| 1:45 | Explain: no keyboard, no hash, brain response cannot be faked |
-| 2:00 | False attempt: different user, same password images → **ACCESS DENIED** |
-| 2:30 | Q&A — mention SNR, threshold tuning, anti-spoofing properties |
+| 0:30 | Show enrollment: user secretly picks 3 images as password (★ STAR, ♦ DIAMOND, ● CIRCLE) |
+| 1:00 | Hit **BEGIN NEURAL SCAN** — images flash for ~57 s (100 events, 5 repeats each) |
+| 2:00 | While scanning: explain the oddball paradigm and P300 latency |
+| 2:10 | **ACCESS GRANTED** → **OPEN VAULT** → passwords appear |
+| 2:30 | Explain: no keyboard, no hash, brain response cannot be faked |
+| 3:00 | False attempt: different user, same password images → **ACCESS DENIED** |
+| 4:00 | Q&A — mention SNR, threshold tuning, anti-spoofing properties |
 
 ---
 
@@ -330,7 +333,7 @@ logs/20260425_022022/
 
 ## Team
 
-Built at the **Br41n.IO Hackathon** by team **SOUBE**:
+Built at the **Br41n.IO Hackathon** by team **SOUDE**:
 
 | Role | Sub-team |
 |---|---|

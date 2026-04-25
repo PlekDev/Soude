@@ -5,8 +5,11 @@ Sub-team 3 (UX/UI) owns this file.
 """
 
 
-from dotenv import load_dotenv
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed — env vars set manually or via shell
 import logging
 import os
 import sys

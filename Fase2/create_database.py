@@ -1,11 +1,15 @@
 import os
+import sys
+
+root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if root not in sys.path:
+    sys.path.append(root)
+
 import time
 import numpy as np
 import pandas as pd
 from scipy import signal
 from dotenv import load_dotenv
-
-# Import the core engine and filters built by the team
 from brain_engine import BrainEngine
 from filters import build_passthought_sos
 

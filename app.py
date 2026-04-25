@@ -29,8 +29,8 @@ from PyQt6.QtWidgets import (
 )
 
 from brain_engine import BrainEngine, MockUnicorn, SAMPLE_RATE
-from signal_processing import AuthenticationPipeline, AuthResult, EPOCH_DURATION_S
-from stimulus_runner import StimulusRunner, ParadigmConfig
+from Fase1.signal_processing import AuthenticationPipeline, AuthResult, EPOCH_DURATION_S
+from Fase1.stimulus_runner import StimulusRunner, ParadigmConfig
 from data_logger import SessionLogger
 
 logger = logging.getLogger(__name__)

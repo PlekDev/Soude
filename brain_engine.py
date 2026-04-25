@@ -44,9 +44,6 @@ GETDATA_BLOCK = 4          # ~16 ms at 250 Hz — keeps latency low
 # Reference: g.tec Unicorn Python API, GetNumberOfAcquiredChannels() == 17
 UNICORN_TOTAL_COLS = 17
 
-info = pylsl.StreamInfo('Unicorn', 'EEG', 8, 250, 'float32', 'unicorn123')
-outlet_lsl = pylsl.StreamOutlet(info)
-
 ruta_unicorn = r"C:\Users\joldo\Documents\gtec\Unicorn Suite\Hybrid Black\Unicorn Python\Lib"
 sys.path.append(ruta_unicorn)
 
@@ -126,7 +123,6 @@ class RealUnicorn(UnicornInterface):
         raw = bytearray(n_samples * n_cols * 4)
         try:
             data = self._device.GetData(n_samples, raw, len(raw))
-            outlet_lsl.push_sample(data)
         except UnicornPy.DeviceException as exc:
             raise RuntimeError(f"Unicorn GetData failed: {exc}") from exc
 

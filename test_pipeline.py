@@ -22,7 +22,7 @@ from brain_engine import (
     BrainEngine, MockUnicorn, SAMPLE_RATE, N_CHANNELS,
     P300_CHANNELS, BUFFER_SAMPLES,
 )
-from signal_processing import (
+from Fase1.signal_processing import (
     AuthenticationPipeline,
     OnlineFilter,
     filter_epoch,
@@ -32,7 +32,7 @@ from signal_processing import (
     build_notch_sos,
     EPOCH_SAMPLES,
 )
-from stimulus_runner import StimulusRunner, ParadigmConfig
+from Fase1.stimulus_runner import StimulusRunner, ParadigmConfig
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -177,7 +177,7 @@ def test_full_pipeline():
 
     # Wait for the last epoch's post-stimulus samples to land in the buffer
     import time
-    from signal_processing import EPOCH_DURATION_S
+    from Fase1.signal_processing import EPOCH_DURATION_S
     time.sleep(EPOCH_DURATION_S + 0.1)
     ok("Post-paradigm buffer wait complete")
 
@@ -204,7 +204,7 @@ def test_data_logger():
     logger_inst.log_marker(marker, epoch)
     ok("log_marker accepted")
 
-    from signal_processing import AuthResult
+    from Fase1.signal_processing import AuthResult
     result = AuthResult(granted=True, target_peak_uv=6.0, nontarget_peak_uv=1.5,
                         snr_db=12.3, message="Test pass")
     logger_inst.log_auth_result(result)

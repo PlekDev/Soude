@@ -17,7 +17,7 @@ from typing import Optional
 import numpy as np
 
 from brain_engine import StimulusMarker, SAMPLE_RATE, N_CHANNELS
-from signal_processing import AuthResult
+from Fase1.signal_processing import AuthResult
 
 logger = logging.getLogger(__name__)
 

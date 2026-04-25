@@ -5,7 +5,7 @@ import pickle
 
 # 1. Leer el libro de texto (tu archivo CSV)
 print("Cargando los datos...")
-df = pd.read_csv('dataset_entrenamiento.csv')
+df = pd.read_csv('Fase2/dataset.csv')
 
 X = df[['Energia_C3', 'Energia_C4']] # Las características (los números)
 y = df['Clase'] # Las respuestas (Reposo o Passthought)
@@ -21,7 +21,7 @@ precision = accuracy_score(y, predicciones) * 100
 print(f"🎯 Examen aprobado con: {precision}% de precisión")
 
 # 4. Guardamos el cerebro del alumno en un archivo
-with open('modelo_passthought.pkl', 'wb') as archivo:
+with open('Fase2/modelo_passthought.pkl', 'wb') as archivo:
     pickle.dump(modelo_svm, archivo)
 
 print("✅ ¡Cerebro guardado exitosamente como 'modelo_passthought.pkl'!")

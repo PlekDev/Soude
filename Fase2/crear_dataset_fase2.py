@@ -69,8 +69,8 @@ def recolectar():
         
         if dataset:
             df = pd.DataFrame(dataset, columns=['Energia_C3', 'Energia_C4', 'Clase'])
-            df.to_csv('dataset_real_fase2.csv', index=False)
-            print(f"\n🏁 ¡LISTO! Archivo 'dataset_real_fase2.csv' generado con {len(df)} muestras.")
+            df.to_csv('Fase2/dataset_real_fase2.csv', index=False)
+            print(f"\n🏁 ¡LISTO! Archivo 'dataset.csv' generado con {len(df)} muestras.")
 
 if __name__ == "__main__":
     recolectar()

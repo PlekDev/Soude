@@ -1,3 +1,5 @@
+# Actualizar para obtener los datos reales desde el unicorn
+
 import pickle
 import pylsl
 import numpy as np
@@ -7,7 +9,7 @@ from scipy import signal
 # 1. DESPERTAR A LA IA
 # ==========================================
 print("Cargando el cerebro artificial (.pkl)...")
-with open('modelo_passthought.pkl', 'rb') as archivo:
+with open('Fase2/modelo_passthought.pkl', 'rb') as archivo:
     modelo_svm = pickle.load(archivo)
 print("✅ IA lista para tomar decisiones.\n")
 

@@ -10,10 +10,10 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
-import pylsl
 import numpy as np
 import sys
 import os
+from pylsl import StreamInfo, StreamOutlet
 
 logger = logging.getLogger(__name__)
 
@@ -365,15 +365,33 @@ class BrainEngine:
     # ── Acquisition Loop ───────────────────────────────────────────────────────
 
     def _acquisition_loop(self) -> None:
-        """
-        Tight loop: pull GETDATA_BLOCK samples, push to ring buffer.
-        Runs in a dedicated daemon thread.
-        """
+        """Bucle de adquisición que también transmite por LSL."""
+        
+        # 1. Configurar el canal de transmisión LSL
+        info = StreamInfo(
+            name='Unicorn_EEG', 
+            type='EEG', 
+            channel_count=N_CHANNELS, 
+            nominal_srate=SAMPLE_RATE, 
+            channel_format='float32', 
+            source_id=self._device.serial if hasattr(self._device, 'serial') else 'mock_123'
+        )
+        outlet = StreamOutlet(info)
+        print("Transmisión LSL iniciada. Otras computadoras ya pueden escuchar.")
+
         consecutive_errors = 0
         while self._running:
             try:
+                # Obtenemos los datos (ej. 4 muestras)
                 samples = self._device.get_data(GETDATA_BLOCK)
+                
+                # Guardamos localmente (tu código original)
                 self._buffer.write(samples)
+                
+                # ¡NUEVO! Enviamos por WiFi a cualquier PC que esté escuchando
+                # pylsl espera una lista de listas, así que convertimos el array de numpy
+                outlet.push_chunk(samples.tolist())
+                
                 consecutive_errors = 0
             except RuntimeError as exc:
                 consecutive_errors += 1

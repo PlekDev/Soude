@@ -40,7 +40,6 @@ AUTH_THRESHOLD_UV = 0.8    # µV — lower bar for real-world signal quality
 # Minimum required epochs per class for reliable averaging
 MIN_EPOCHS = 2             # Lowered to tolerate aggressive artifact rejection
 
-
 @dataclass
 class AuthResult:
     granted: bool

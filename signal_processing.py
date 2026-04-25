@@ -200,10 +200,13 @@ class PassthoughtClassifier:
         """
         if self._model is None:
             return "Passthought"
+        import warnings
         filtered = sosfilt(_PT_SOS, window.T).T          # (samples, channels)
         energia_c3 = float(np.var(filtered[:, 2]))       # Cz  – matches training
         energia_c4 = float(np.var(filtered[:, 4]))       # Pz  – matches training
-        return str(self._model.predict([[energia_c3, energia_c4]])[0])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")              # suppress feature-name warning
+            return str(self._model.predict([[energia_c3, energia_c4]])[0])
 
     def classify_from_engine(self, engine: "BrainEngine") -> str:
         """

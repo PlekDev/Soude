@@ -5,7 +5,10 @@
       "Bash(pip install *)",
       "Bash(python entrenar_modelo.py)",
       "Bash(python -c ' *)",
-      "Bash(python -c \"import sklearn; print\\(sklearn.__version__\\)\")"
+      "Bash(python -c \"import sklearn; print\\(sklearn.__version__\\)\")",
+      "Bash(python simulation.py)",
+      "Bash(python -c \"from brain_engine import BrainEngine, MockUnicorn; from app import UNICORN_SERIAL; print\\('OK - UNICORN_SERIAL:', repr\\(UNICORN_SERIAL\\)\\)\")",
+      "Bash(python test_pipeline.py)"
     ]
   }
 }

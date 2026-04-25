@@ -8,9 +8,14 @@ Usage:
 """
 
 import logging
+import sys
 import time
 
 import numpy as np
+
+# Force UTF-8 output so box-drawing characters print correctly on Windows
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -99,10 +104,6 @@ def test_filters():
     combined = (sig_10hz + sig_60hz)[:, np.newaxis].repeat(N_CHANNELS, axis=1)
 
     filtered = filter_epoch(combined)
-    power_60hz_in  = float(np.var(sig_60hz))
-    power_60hz_out = float(np.var(filtered[:, 0]) - np.var(sig_10hz * 0.9))
-
-    # After filtering the 60 Hz component should be greatly reduced
     ok(f"filter_epoch runs on (n={SAMPLE_RATE}, C={N_CHANNELS}) without error")
 
     filt = OnlineFilter()

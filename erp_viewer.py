@@ -83,9 +83,10 @@ class ERPCanvas(QWidget):
         plot_h = h - mt - mb
 
         def to_px(t_ms: float, amp: float):
-            t_range = (self._t_ms[-1] - self._t_ms[0]) if self._t_ms else 800.0
+            t_range = max((self._t_ms[-1] - self._t_ms[0]) if self._t_ms else 800.0, 1e-9)
             x = ml + (t_ms - (self._t_ms[0] if self._t_ms else 0)) / t_range * plot_w
-            y = mt + (1 - (amp - self._y_min) / (self._y_max - self._y_min)) * plot_h
+            y_range = max(self._y_max - self._y_min, 1e-9)
+            y = mt + (1 - (amp - self._y_min) / y_range) * plot_h
             return x, y
 
         # Background

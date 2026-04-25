@@ -165,7 +165,6 @@ class MockUnicorn(UnicornInterface):
         Cz, Pz, Oz.  Sleeps to pace at real hardware sample rate so the ring
         buffer doesn't overflow in test/simulator mode.
         """
-        import time
         # Block for the natural duration of n_samples (mimics hardware behaviour)
         time.sleep(n_samples / SAMPLE_RATE)
         # 1/f noise approximation: white noise low-passed in frequency
@@ -182,8 +181,6 @@ class MockUnicorn(UnicornInterface):
             still_pending = []
             for remaining in self._pending_p300:
                 for s in range(n_samples):
-                    abs_pos = (self._sample_counter + s)
-                    peak_pos = abs_pos + remaining - s  # align relative position
                     dist = abs(s - (n_samples - remaining))
                     if dist < self._P300_WIDTH_SAMPLES:
                         sigma = self._P300_WIDTH_SAMPLES / 2.5

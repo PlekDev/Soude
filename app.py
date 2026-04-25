@@ -605,14 +605,15 @@ class EnrollmentScreen(QWidget):
         # ── Image grid ────────────────────────────────────────────────────────
         grid = QGridLayout()
         grid.setSpacing(8)
+        from PyQt6.QtCore import QSize
+        thumb_icon_size = QSize(self._THUMB - 4, self._THUMB - 4)
         for img_id in range(IMAGE_COUNT):
             btn = QPushButton(self)
             btn.setFixedSize(self._THUMB, self._THUMB)
             btn.setCheckable(True)
             px = self._make_thumb(img_id)
             btn.setIcon(px)
-            from PyQt6.QtCore import QSize
-            btn.setIconSize(QSize(self._THUMB - 4, self._THUMB - 4))
+            btn.setIconSize(thumb_icon_size)
             btn.setStyleSheet(self._btn_style(False))
             btn.clicked.connect(lambda checked, i=img_id: self._toggle(i))
             self._buttons[img_id] = btn
@@ -944,7 +945,6 @@ class MainWindow(QMainWindow):
     def _update_signal_quality(self):
         try:
             from data_logger import ImpedanceChecker
-            from signal_processing import PassthoughtClassifier
             snap = self._engine.buffer.snapshot()
             report = ImpedanceChecker().check(snap)
             self._home_screen.update_signal_quality(report)

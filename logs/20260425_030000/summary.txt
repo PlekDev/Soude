@@ -1,0 +1,12 @@
+============================================================
+NEURO-LOCK SESSION — 20260425_030000
+============================================================
+Total stimuli:   32
+Epochs saved:    6
+
+AUTH RESULT:     DENIED ✗
+Target P300:     0.000 µV
+Non-target P300: 0.000 µV
+SNR:             -999.00 dB
+Message:         Insufficient target epochs: 0/3 required.
+============================================================

@@ -1,0 +1,8 @@
+{
+  "granted": true,
+  "target_peak_uv": 6.0,
+  "nontarget_peak_uv": 1.5,
+  "snr_db": 12.3,
+  "message": "Test pass",
+  "erp_data": null
+}

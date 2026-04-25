@@ -1,0 +1,12 @@
+============================================================
+NEURO-LOCK SESSION — test_session
+============================================================
+Total stimuli:   1
+Epochs saved:    1
+
+AUTH RESULT:     GRANTED ✓
+Target P300:     6.000 µV
+Non-target P300: 1.500 µV
+SNR:             12.30 dB
+Message:         Test pass
+============================================================

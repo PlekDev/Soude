@@ -1,0 +1,72 @@
+@page "/cortes/vercortes"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using SisteventasWebsiteBlazor.Classes
+@inject ApiService Api
+@inject NavigationManager Nav
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+<div class="min-h-screen bg-gray-100 p-6">
+<div class="mx-auto max-w-5xl">
+<h1 class="mb-6 text-3xl font-bold text-gray-800">Mis Cortes de Caja</h1>
+@if (cargando)
+{
+<div class="flex items-center justify-center py-10">
+<div class="h-10 w-10 animate-spin rounded-full border-4 border-blue-500 border-t-transparent"></div>
+</div>
+}
+else if (cortes?.Count == 0)
+{
+<div class="rounded bg-white p-6 text-center shadow">
+<p class="text-lg text-gray-600">No hay cortes disponibles.</p>
+</div>
+}
+else
+{
+<div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+@if(cortes != null && cortes.Count > 0)
+{
+@foreach (var corte in cortes)
+{
+<div @onclick="() => VerDetalle(corte.Id)"
+class="cursor-pointer rounded-xl border border-gray-200 bg-white p-5 shadow transition hover:shadow-lg hover:ring-2 hover:ring-blue-400">
+<div class="mb-2 flex items-center justify-between">
+<span class="text-sm font-medium text-gray-500">@corte.NombreNegocio</span>
+<span class="text-sm text-gray-400">@corte.FechaHora.ToString()</span>
+</div>
+<p class="text-lg font-semibold text-blue-600">@corte.TotalVentas.ToString("C")</p>
+<p class="text-sm text-gray-600">Cajero: <span class="font-medium">@corte.Cajero</span></p>
+<p class="text-sm text-gray-600"># Ventas: <span class="font-medium">@corte.NumeroDeVentas</span></p>
+</div>
+}
+} else
+{
+
+<div class="rounded bg-white p-6 text-center shadow">
+<p class="text-lg text-gray-600">No hay cortes disponibles.</p>
+</div>
+}
+</div>
+}
+</div>
+</div>
+@code {
+List<CorteResumen> cortes = new();
+bool cargando = true;
+
+protected override async Task OnInitializedAsync()
+{
+try
+{
+cortes = await Api.ObtenerCortesAsync();
+}
+catch
+{
+// Puedes agregar manejo de errores si lo deseas
+}
+cargando = false;
+}
+void VerDetalle(int id)
+{
+Nav.NavigateTo($"/cortes/corte-detalle/{id}");
+}
+}

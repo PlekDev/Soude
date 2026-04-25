@@ -10,8 +10,10 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
-
+import pylsl
 import numpy as np
+import sys
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,11 @@ GETDATA_BLOCK = 4          # ~16 ms at 250 Hz — keeps latency low
 # Reference: g.tec Unicorn Python API, GetNumberOfAcquiredChannels() == 17
 UNICORN_TOTAL_COLS = 17
 
+info = pylsl.StreamInfo('Unicorn', 'EEG', 8, 250, 'float32', 'unicorn123')
+outlet_lsl = pylsl.StreamOutlet(info)
+
+ruta_unicorn = r"C:\Users\joldo\Documents\gtec\Unicorn Suite\Hybrid Black\Unicorn Python\Lib"
+sys.path.append(ruta_unicorn)
 
 @dataclass
 class StimulusMarker:
@@ -118,7 +125,8 @@ class RealUnicorn(UnicornInterface):
         n_cols = UNICORN_TOTAL_COLS
         raw = bytearray(n_samples * n_cols * 4)
         try:
-            self._device.GetData(n_samples, raw, len(raw))
+            data = self._device.GetData(n_samples, raw, len(raw))
+            outlet_lsl.push_sample(data)
         except UnicornPy.DeviceException as exc:
             raise RuntimeError(f"Unicorn GetData failed: {exc}") from exc
 

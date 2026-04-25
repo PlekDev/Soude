@@ -4,6 +4,9 @@ High-speed stimulus display, enrollment wizard, and vault screen.
 Sub-team 3 (UX/UI) owns this file.
 """
 
+
+from dotenv import load_dotenv
+load_dotenv()
 import logging
 import os
 import sys

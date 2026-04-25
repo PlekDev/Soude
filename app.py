@@ -780,6 +780,15 @@ class HomeScreen(QWidget):
         )
         layout.addWidget(self._pw_lbl)
 
+        # ── Passthought state (SVM live classification) ───────────────────────
+        self._pt_lbl = QLabel("FOCUS: —", self)
+        self._pt_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._pt_lbl.setStyleSheet(
+            f"color: {Colors.TEXT_LO}; font-size: 11px; letter-spacing: 2px; "
+            f"font-family: 'Share Tech Mono', monospace;"
+        )
+        layout.addWidget(self._pt_lbl)
+
         layout.addSpacing(8)
 
         self._btn_auth = GlowButton("▶  BEGIN NEURAL SCAN", Colors.ACCENT)
@@ -832,6 +841,20 @@ class HomeScreen(QWidget):
                 f"color: #000; font-size: 9px; font-weight: bold; border: none;"
             )
 
+    def update_passthought_state(self, state: str):
+        if state == "Passthought":
+            self._pt_lbl.setText("FOCUS: ● PASSTHOUGHT DETECTED")
+            self._pt_lbl.setStyleSheet(
+                f"color: {Colors.SUCCESS}; font-size: 11px; letter-spacing: 2px; "
+                f"font-family: 'Share Tech Mono', monospace;"
+            )
+        else:
+            self._pt_lbl.setText("FOCUS: ○ RESTING")
+            self._pt_lbl.setStyleSheet(
+                f"color: {Colors.TEXT_LO}; font-size: 11px; letter-spacing: 2px; "
+                f"font-family: 'Share Tech Mono', monospace;"
+            )
+
 
 # ── Main Window ──────────────────────────────────────────────────────────────────────────────
 
@@ -850,6 +873,9 @@ class MainWindow(QMainWindow):
             self._engine = BrainEngine(device=MockUnicorn())
 
         self._password_ids = list(DEFAULT_PASSWORD_IDS)
+
+        from signal_processing import PassthoughtClassifier
+        self._pt_classifier = PassthoughtClassifier()
 
         self._stack = QStackedWidget(self)
         self.setCentralWidget(self._stack)
@@ -918,9 +944,12 @@ class MainWindow(QMainWindow):
     def _update_signal_quality(self):
         try:
             from data_logger import ImpedanceChecker
+            from signal_processing import PassthoughtClassifier
             snap = self._engine.buffer.snapshot()
             report = ImpedanceChecker().check(snap)
             self._home_screen.update_signal_quality(report)
+            state = self._pt_classifier.classify_from_engine(self._engine)
+            self._home_screen.update_passthought_state(state)
         except Exception:
             pass
 

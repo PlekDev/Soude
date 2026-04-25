@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from signal_processing import PassthoughtClassifier, AuthenticationPipeline; print\\('imports OK'\\)\")",
+      "Bash(pip install *)",
+      "Bash(python entrenar_modelo.py)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import sklearn; print\\(sklearn.__version__\\)\")"
+    ]
+  }
+}

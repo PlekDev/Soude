@@ -71,6 +71,11 @@ def build_notch_sos(freq: float = 60.0, quality: float = 30.0) -> np.ndarray:
 _BP_SOS     = build_bandpass_sos()
 _NOTCH_SOS  = build_notch_sos()
 
+# Passthought classifier: 8–30 Hz mu/beta band, 2-second window
+_PT_WINDOW_SAMPLES = int(2.0 * SAMPLE_RATE)
+_PT_SOS = butter(4, [8.0 / (SAMPLE_RATE / 2), 30.0 / (SAMPLE_RATE / 2)],
+                 btype="bandpass", output="sos")
+
 
 # ── Stateful Online Filter ─────────────────────────────────────────────────────
 
@@ -146,6 +151,74 @@ def is_artifact(epoch: np.ndarray, threshold_uv: float = 800.0) -> bool:
     return False
 
 
+# ── Passthought Classifier ────────────────────────────────────────────────────
+
+class PassthoughtClassifier:
+    """
+    Classifies 2-second EEG windows as 'Passthought' or 'Reposo' using the
+    trained SVM from modelo_passthought.pkl.
+
+    Feature extraction is identical to generador_dataset.py:
+      - 8–30 Hz bandpass (mu/beta band)
+      - Variance of channel index 2 (Cz) and index 4 (Pz), labelled
+        Energia_C3 / Energia_C4 in the training set
+
+    Falls back to 'Passthought' for every window when the model file is
+    missing, so the rest of the pipeline keeps working without the .pkl.
+    """
+
+    def __init__(self, model_path: str = "modelo_passthought.pkl"):
+        self._model = None
+        self._load(model_path)
+
+    def _load(self, path: str) -> None:
+        import pickle
+        import warnings
+        from pathlib import Path
+        p = Path(path)
+        if not p.exists():
+            p = Path(__file__).parent / path
+        try:
+            with open(p, "rb") as f:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")   # suppress sklearn version mismatch
+                    self._model = pickle.load(f)
+            logger.info("PassthoughtClassifier: loaded from %s", p)
+        except FileNotFoundError:
+            logger.warning(
+                "PassthoughtClassifier: %s not found – epoch filtering disabled.", p
+            )
+
+    @property
+    def is_available(self) -> bool:
+        return self._model is not None
+
+    def classify_window(self, window: np.ndarray) -> str:
+        """
+        window: (_PT_WINDOW_SAMPLES, N_CHANNELS) raw EEG in µV
+        Returns 'Passthought' or 'Reposo'.
+        """
+        if self._model is None:
+            return "Passthought"
+        filtered = sosfilt(_PT_SOS, window.T).T          # (samples, channels)
+        energia_c3 = float(np.var(filtered[:, 2]))       # Cz  – matches training
+        energia_c4 = float(np.var(filtered[:, 4]))       # Pz  – matches training
+        return str(self._model.predict([[energia_c3, energia_c4]])[0])
+
+    def classify_from_engine(self, engine: "BrainEngine") -> str:
+        """
+        Classify the most recent 2-second window straight from BrainEngine.
+        Returns 'Reposo' if the buffer hasn't accumulated enough data yet.
+        """
+        total = engine.buffer.total_written
+        if total < _PT_WINDOW_SAMPLES:
+            return "Reposo"
+        window = engine.buffer.read_from(total - _PT_WINDOW_SAMPLES, _PT_WINDOW_SAMPLES)
+        if window is None:
+            return "Reposo"
+        return self.classify_window(window)
+
+
 # ── Epoch Extractor ────────────────────────────────────────────────────────────
 
 class EpochExtractor:
@@ -161,6 +234,7 @@ class EpochExtractor:
         marker: StimulusMarker,
         pre_samples: int = BASELINE_SAMPLES,
         reject_artifacts: bool = True,
+        classifier: Optional["PassthoughtClassifier"] = None,
     ) -> Optional[np.ndarray]:
         """
         Pull EPOCH_SAMPLES starting at (marker.buffer_index - pre_samples),
@@ -194,6 +268,17 @@ class EpochExtractor:
         if reject_artifacts and is_artifact(epoch):
             logger.debug("Epoch for id=%d rejected (artifact).", marker.image_id)
             return None
+
+        if classifier and classifier.is_available:
+            win_start = marker.buffer_index - _PT_WINDOW_SAMPLES
+            if win_start >= 0:
+                win = self._engine.buffer.read_from(win_start, _PT_WINDOW_SAMPLES)
+                if win is not None and classifier.classify_window(win) != "Passthought":
+                    logger.debug(
+                        "Epoch id=%d discarded: SVM classified as Reposo.",
+                        marker.image_id,
+                    )
+                    return None
 
         return epoch   # (EPOCH_SAMPLES, N_CHANNELS)
 
@@ -284,10 +369,15 @@ class AuthenticationPipeline:
     """
 
     def __init__(self, engine: BrainEngine, target_ids: Optional[list[int]] = None):
-        self._engine     = engine
-        self._extractor  = EpochExtractor(engine)
-        self._averager   = SignalAverager()
+        self._engine      = engine
+        self._extractor   = EpochExtractor(engine)
+        self._averager    = SignalAverager()
         self._target_ids: set[int] = set(target_ids or [])
+        self._classifier  = PassthoughtClassifier()   # loads modelo_passthought.pkl
+
+    @property
+    def classifier(self) -> PassthoughtClassifier:
+        return self._classifier
 
     def set_targets(self, target_ids: list[int]) -> None:
         self._target_ids = set(target_ids)
@@ -307,7 +397,7 @@ class AuthenticationPipeline:
         accepted = rejected = 0
 
         for marker in markers:
-            epoch = self._extractor.extract(marker)
+            epoch = self._extractor.extract(marker, classifier=self._classifier)
             if epoch is None:
                 rejected += 1
                 continue

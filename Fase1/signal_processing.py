@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-from scipy.signal import butter, sosfiltfilt, iirnotch, sosfilt_zi, sosfilt
+from scipy.signal import sosfiltfilt, sosfilt_zi, sosfilt
+from filters import *
 
 from brain_engine import (
     SAMPLE_RATE,
@@ -51,58 +52,39 @@ class AuthResult:
 
 # ── Filter Construction ────────────────────────────────────────────────────────
 
-def build_bandpass_sos(low: float = 1.0, high: float = 10.0, order: int = 4) -> np.ndarray:
-    """4th-order Butterworth bandpass as second-order sections."""
-    nyq = SAMPLE_RATE / 2.0
-    sos = butter(order, [low / nyq, high / nyq], btype="band", output="sos")
-    return sos
-
-
-def build_notch_sos(freq: float = 60.0, quality: float = 30.0) -> np.ndarray:
-    """IIR notch filter at `freq` Hz (use 50 Hz for Europe/Mexico)."""
-    b, a = iirnotch(freq / (SAMPLE_RATE / 2.0), quality)
-    # Convert BA to SOS for numerical stability
-    from scipy.signal import tf2sos
-    sos = tf2sos(b, a)
-    return sos
-
-
 # Pre-build filters once at module load (cheap, avoids repeated construction)
-_BP_SOS     = build_bandpass_sos()
-_NOTCH_SOS  = build_notch_sos()
-
+_P300_CHAIN = build_p300_chain()
 
 # ── Stateful Online Filter ─────────────────────────────────────────────────────
 
 class OnlineFilter:
     """
-    Applies bandpass + notch using stateful SOS filtering so it can process
+    Applies the P300 filter chain using stateful SOS filtering so it can process
     streaming chunks without phase discontinuities.
     Operates on shape (n_samples, N_CHANNELS).
     """
 
     def __init__(self):
-        # sosfilt_zi returns (n_sections, 2).
-        # When filtering (N_CHANNELS, n_samples) with axis=-1,
-        # zi must be (n_sections, N_CHANNELS, 2).
-        bp_zi_1ch    = sosfilt_zi(_BP_SOS)        # (sections, 2)
-        notch_zi_1ch = sosfilt_zi(_NOTCH_SOS)     # (sections, 2)
-
-        # Expand to (sections, N_CHANNELS, 2)
-        self._bp_zi    = np.repeat(bp_zi_1ch[:, np.newaxis, :],    N_CHANNELS, axis=1)
-        self._notch_zi = np.repeat(notch_zi_1ch[:, np.newaxis, :], N_CHANNELS, axis=1)
+        # Creamos una lista de estados (zi) para cada filtro en la cadena
+        self._zis = []
+        for sos in _P300_CHAIN:
+            zi_1ch = sosfilt_zi(sos)  # (sections, 2)
+            # Expand to (sections, N_CHANNELS, 2)
+            zi_expanded = np.repeat(zi_1ch[:, np.newaxis, :], N_CHANNELS, axis=1)
+            self._zis.append(zi_expanded)
 
     def process(self, chunk: np.ndarray) -> np.ndarray:
         """
         chunk: (n_samples, N_CHANNELS)
         Returns filtered chunk of the same shape.
         """
-        # sosfilt expects (channels, samples) → transpose
         x = chunk.T   # (N_CHANNELS, n_samples)
-        y_bp,    self._bp_zi    = sosfilt(_BP_SOS,    x, zi=self._bp_zi)
-        y_notch, self._notch_zi = sosfilt(_NOTCH_SOS, y_bp, zi=self._notch_zi)
-        return y_notch.T   # back to (n_samples, N_CHANNELS)
-
+        
+        # Aplicamos cada filtro de la cadena secuencialmente, guardando su estado
+        for i, sos in enumerate(_P300_CHAIN):
+            x, self._zis[i] = sosfilt(sos, x, zi=self._zis[i])
+            
+        return x.T   # back to (n_samples, N_CHANNELS)
 
 # ── Offline / Epoch Filter ─────────────────────────────────────────────────────
 
@@ -112,9 +94,13 @@ def filter_epoch(epoch: np.ndarray) -> np.ndarray:
     Uses sosfiltfilt (forward-backward) — suitable for offline per-epoch processing.
     Safe for short epochs (>= 3× filter order satisfied at 200 samples).
     """
-    filtered = sosfiltfilt(_BP_SOS,    epoch.T).T
-    filtered = sosfiltfilt(_NOTCH_SOS, filtered.T).T
-    return filtered
+    filtered = epoch.T
+    
+    # Aplicamos cada filtro de la cadena hacia adelante y hacia atrás (zero-phase)
+    for sos in _P300_CHAIN:
+        filtered = sosfiltfilt(sos, filtered)
+        
+    return filtered.T
 
 
 # ── Baseline Correction ────────────────────────────────────────────────────────

@@ -58,7 +58,6 @@ def build_mu_beta_chain(notch_freq: float = 60.0) -> list[np.ndarray]:
     ]
 
 # Aplicacion
-
 def apply_filter_chain(
     data: np.ndarray,
     sos_chain: list[np.ndarray],

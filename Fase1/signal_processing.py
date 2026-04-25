@@ -42,7 +42,6 @@ AUTH_THRESHOLD_UV = 1.5    # µV — a genuine P300 mean should comfortably exce
 # Minimum required epochs per class for reliable averaging
 MIN_EPOCHS = 2             # Lowered to tolerate aggressive artifact rejection
 
-
 @dataclass
 class AuthResult:
     granted: bool

@@ -235,13 +235,14 @@ class StimulusRunner:
 def _precise_wait_until(target_t: float) -> None:
     """
     Busy-wait until perf_counter() >= target_t.
-    Falls back to sleep for the bulk of the wait to reduce CPU load,
-    then spins for the final 2 ms window.
+    Sleeps for the bulk of the wait, then spins for the final 15 ms.
+    15 ms spin (vs 2 ms) ensures we are already spinning before the Windows
+    scheduler quantum (~15.6 ms) can preempt us and cause a late wake.
     """
-    sleep_until = target_t - 0.002   # sleep up to 2 ms before target
+    sleep_until = target_t - 0.015   # sleep until 15 ms before target
     now = time.perf_counter()
     if now < sleep_until:
         time.sleep(sleep_until - now)
-    # Final spin for precision
+    # Final high-precision spin
     while time.perf_counter() < target_t:
         pass

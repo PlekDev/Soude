@@ -34,8 +34,10 @@ P300_OFFSET_S  = 0.500
 P300_ONSET     = int(P300_ONSET_S  * SAMPLE_RATE)
 P300_OFFSET    = int(P300_OFFSET_S * SAMPLE_RATE)
 
-# Authentication threshold: target peak must exceed non-target + this margin (µV)
-AUTH_THRESHOLD_UV = 0.8    # µV — lower bar for real-world signal quality
+# Authentication threshold — mean(target − non-target) across 250–500 ms window.
+# With visually equated stimuli, this mean is ≈ 0 µV for non-attending subjects
+# and ≈ 3–8 µV for a genuine cognitive P300.
+AUTH_THRESHOLD_UV = 1.5    # µV — a genuine P300 mean should comfortably exceed this.
 
 # Minimum required epochs per class for reliable averaging
 MIN_EPOCHS = 2             # Lowered to tolerate aggressive artifact rejection
@@ -342,22 +344,54 @@ class AuthenticationPipeline:
         target_avg    = self._averager.target_average()
         nontarget_avg = self._averager.nontarget_average()
 
-        target_peak    = compute_p300_peak(target_avg)
-        nontarget_peak = compute_p300_peak(nontarget_avg)
+        # ── Mean-difference detection ─────────────────────────────────────────
+        # With visually equated stimuli (all images same background/luminance),
+        # no Visual Evoked Potential (VEP) component remains in the difference
+        # waveform — only a cognitive P300 survives averaging.  The mean of the
+        # difference across the 250–500 ms window is therefore the right measure:
+        #
+        #   • For a non-attending subject: target − non-target ≈ 0 at every
+        #     sample → mean ≈ 0 µV → DENIED.
+        #
+        #   • For a genuine user: their cognitive P300 adds a consistent
+        #     positive deflection at ~300–500 ms only in target epochs → mean > 0.
+        #
+        # WHY NOT PEAK:  peak-of-difference searches 63 samples for the largest
+        # single value.  Pure Gaussian noise with σ ≈ 5 µV (grand-average
+        # noise with 15 target epochs) produces an expected maximum of ≈ 15 µV
+        # — guaranteed false positives regardless of stimulus design.
+        t_series  = target_avg   [P300_ONSET:P300_OFFSET, :][:, P300_CHANNELS].mean(axis=1)
+        nt_series = nontarget_avg[P300_ONSET:P300_OFFSET, :][:, P300_CHANNELS].mean(axis=1)
+        diff_series = t_series - nt_series
 
-        # Noise estimate: std of non-target P300 window across P300_CHANNELS
-        nt_window = nontarget_avg[P300_ONSET:P300_OFFSET, :][:, P300_CHANNELS]
-        noise_std = float(np.std(nt_window))
+        # Grand-average mean difference across the P300 window
+        delta          = float(diff_series.mean())
+        target_peak    = float(t_series.mean())
+        nontarget_peak = float(nt_series.mean())
+
+        # Noise estimate from the pre-P300 window (0–250 ms), where no
+        # cognitive ERP is expected.  This gives an in-session noise floor.
+        pre_t   = target_avg   [0:P300_ONSET, :][:, P300_CHANNELS].mean(axis=1)
+        pre_nt  = nontarget_avg[0:P300_ONSET, :][:, P300_CHANNELS].mean(axis=1)
+        pre_std = float(np.std(pre_t - pre_nt))          # σ of pre-P300 diff
+        noise_std = max(pre_std, 1e-6)
 
         snr = compute_snr_db(target_peak, nontarget_peak, noise_std)
-        granted = (target_peak - nontarget_peak) >= AUTH_THRESHOLD_UV
+
+        # Dual-criteria grant: amplitude AND pre-window SNR must both pass.
+        # - abs(delta) >= AUTH_THRESHOLD_UV guards against large-noise sessions.
+        # - abs(delta) >= PRE_SNR_RATIO * noise_std normalises to in-session noise,
+        #   ensuring the P300 window is meaningfully above the pre-stimulus baseline.
+        PRE_SNR_RATIO = 1.5          # P300 window must be 1.5× the pre-window σ
+        granted = (abs(delta) >= AUTH_THRESHOLD_UV and
+                   abs(delta) >= PRE_SNR_RATIO * noise_std)
 
         msg = (
-            f"GRANTED — ΔP300={target_peak - nontarget_peak:.2f} µV, "
-            f"SNR={snr:.1f} dB"
+            f"GRANTED — mean|ΔP300|={abs(delta):.2f} µV, "
+            f"pre_σ={noise_std:.2f} µV, SNR={snr:.1f} dB"
             if granted else
-            f"DENIED — ΔP300={target_peak - nontarget_peak:.2f} µV "
-            f"(threshold={AUTH_THRESHOLD_UV} µV)"
+            f"DENIED — mean|ΔP300|={abs(delta):.2f} µV "
+            f"(need ≥{AUTH_THRESHOLD_UV} µV AND ≥{PRE_SNR_RATIO}×pre_σ={PRE_SNR_RATIO*noise_std:.2f} µV)"
         )
         logger.info("Auth result: %s", msg)
 

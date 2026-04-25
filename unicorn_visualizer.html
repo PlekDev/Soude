@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unicorn EEG Live Visualizer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #0d0f14;
+    color: #e2e8f0;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    background: #141720;
+    border-bottom: 1px solid #1e2535;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .logo-icon {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, #7c3aed, #4f46e5);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  .logo-text { font-size: 16px; font-weight: 600; color: #f1f5f9; }
+  .logo-sub  { font-size: 11px; color: #64748b; }
+
+  .status-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .status-badge {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: #94a3b8;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 6px #22c55e88;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{ opacity:1 } 50%{ opacity:.45 } }
+  .stat-chip {
+    background: #1e2535; border: 1px solid #2a3350;
+    border-radius: 6px; padding: 3px 10px;
+    font-size: 12px; color: #cbd5e1;
+  }
+  .stat-chip span { color: #818cf8; font-weight: 600; }
+
+  /* ── Main layout ── */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 0;
+    height: calc(100vh - 56px);
+  }
+
+  /* ── Left: Channels ── */
+  .channels-panel {
+    padding: 12px 14px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .channels-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .panel-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #475569; font-weight: 600; }
+  .controls { display: flex; gap: 8px; align-items: center; }
+  .btn {
+    background: #1e2535; border: 1px solid #2a3350;
+    color: #94a3b8; font-size: 11px; padding: 4px 10px;
+    border-radius: 5px; cursor: pointer; transition: all .15s;
+  }
+  .btn:hover { background: #263045; color: #e2e8f0; }
+  .btn.active { background: #312e81; border-color: #4f46e5; color: #a5b4fc; }
+  .scale-label { font-size: 11px; color: #64748b; }
+
+  .channel-row {
+    display: grid;
+    grid-template-columns: 44px 1fr 54px;
+    align-items: center;
+    gap: 8px;
+    background: #141720;
+    border: 1px solid #1e2535;
+    border-radius: 6px;
+    padding: 3px 8px 3px 6px;
+    transition: border-color .2s;
+  }
+  .channel-row:hover { border-color: #2a3350; }
+
+  .ch-label {
+    font-size: 12px; font-weight: 600;
+    color: #94a3b8; text-align: center;
+  }
+  .ch-canvas { display: block; width: 100%; height: 46px; }
+  .ch-value {
+    font-size: 11px; font-family: 'Courier New', monospace;
+    color: #64748b; text-align: right; min-width: 50px;
+  }
+  .ch-value span { display: block; font-size: 10px; color: #334155; }
+
+  /* ── Right: Sidebar ── */
+  .sidebar {
+    background: #0f1117;
+    border-left: 1px solid #1e2535;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow-y: auto;
+  }
+
+  .card {
+    background: #141720;
+    border: 1px solid #1e2535;
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .card-title {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+    color: #475569; font-weight: 600; margin-bottom: 10px;
+  }
+
+  /* Signal quality bars */
+  .quality-row {
+    display: grid;
+    grid-template-columns: 36px 1fr 40px;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+  }
+  .q-label { font-size: 11px; color: #94a3b8; text-align: right; }
+  .q-bar-bg {
+    height: 6px; background: #1e2535; border-radius: 3px; overflow: hidden;
+  }
+  .q-bar { height: 100%; border-radius: 3px; transition: width .4s ease; }
+  .q-pct { font-size: 10px; color: #64748b; text-align: right; }
+
+  /* Band power */
+  .bands-grid { display: flex; flex-direction: column; gap: 7px; }
+  .band-row { display: flex; flex-direction: column; gap: 2px; }
+  .band-header { display: flex; justify-content: space-between; align-items: baseline; }
+  .band-name { font-size: 11px; color: #94a3b8; }
+  .band-hz { font-size: 9px; color: #475569; }
+  .band-power-val { font-size: 11px; font-family: monospace; color: #64748b; }
+  .band-bar-bg { height: 8px; background: #1e2535; border-radius: 4px; overflow: hidden; }
+  .band-bar { height: 100%; border-radius: 4px; transition: width .5s ease; }
+
+  /* Stats */
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat-box {
+    background: #0d0f14;
+    border: 1px solid #1e2535;
+    border-radius: 6px;
+    padding: 7px 9px;
+  }
+  .stat-box-label { font-size: 9px; text-transform: uppercase; letter-spacing: .07em; color: #475569; margin-bottom: 2px; }
+  .stat-box-val { font-size: 16px; font-weight: 600; font-family: monospace; color: #e2e8f0; }
+  .stat-box-unit { font-size: 9px; color: #64748b; margin-left: 2px; }
+
+  /* Impedance */
+  .imp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .imp-cell {
+    background: #0d0f14; border: 1px solid #1e2535;
+    border-radius: 5px; padding: 5px 7px; text-align: center;
+  }
+  .imp-ch { font-size: 10px; color: #64748b; }
+  .imp-val { font-size: 13px; font-weight: 600; font-family: monospace; }
+
+  /* FFT mini-canvas */
+  #fft-canvas { display: block; width: 100%; border-radius: 4px; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a3350; border-radius: 2px; }
+
+  @media (max-width: 700px) {
+    .main { grid-template-columns: 1fr; }
+    .sidebar { border-left: none; border-top: 1px solid #1e2535; height: auto; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">🦄</div>
+    <div>
+      <div class="logo-text">Unicorn EEG Visualizer</div>
+      <div class="logo-sub">g.tec Unicorn Hybrid Black — 8 channel</div>
+    </div>
+  </div>
+  <div class="status-row">
+    <div class="status-badge"><div class="dot"></div> Live</div>
+    <div class="stat-chip">Sample rate: <span>250 Hz</span></div>
+    <div class="stat-chip">Range: <span>±150 µV</span></div>
+    <div class="stat-chip">Samples: <span id="sample-count">0</span></div>
+    <div class="stat-chip" id="clock">00:00:00</div>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+
+  <!-- Left: EEG channels -->
+  <div class="channels-panel">
+    <div class="channels-header">
+      <div class="panel-title">EEG Channels</div>
+      <div class="controls">
+        <span class="scale-label">Scale:</span>
+        <button class="btn" id="scale-50" onclick="setScale(50)">50µV</button>
+        <button class="btn active" id="scale-150" onclick="setScale(150)">150µV</button>
+        <button class="btn" id="scale-300" onclick="setScale(300)">300µV</button>
+        <button class="btn" id="btn-pause" onclick="togglePause()">⏸ Pause</button>
+      </div>
+    </div>
+    <div id="channel-list"></div>
+  </div>
+
+  <!-- Right: Sidebar -->
+  <div class="sidebar">
+
+    <!-- Signal Quality -->
+    <div class="card">
+      <div class="card-title">Signal Quality</div>
+      <div id="quality-bars"></div>
+    </div>
+
+    <!-- Live Stats -->
+    <div class="card">
+      <div class="card-title">Live Stats</div>
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-box-label">Peak</div>
+          <div class="stat-box-val" id="stat-peak">—<span class="stat-box-unit">µV</span></div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-box-label">RMS</div>
+          <div class="stat-box-val" id="stat-rms">—<span class="stat-box-unit">µV</span></div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-box-label">SNR</div>
+          <div class="stat-box-val" id="stat-snr">—<span class="stat-box-unit">dB</span></div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-box-label">Drift</div>
+          <div class="stat-box-val" id="stat-drift">—<span class="stat-box-unit">µV/s</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Band Power -->
+    <div class="card">
+      <div class="card-title">Brainwave Bands</div>
+      <div class="bands-grid" id="bands-grid"></div>
+    </div>
+
+    <!-- FFT Spectrum -->
+    <div class="card">
+      <div class="card-title">Frequency Spectrum (Cz)</div>
+      <canvas id="fft-canvas" height="80"></canvas>
+    </div>
+
+    <!-- Impedance -->
+    <div class="card">
+      <div class="card-title">Impedance (kΩ)</div>
+      <div class="imp-grid" id="imp-grid"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────
+const CHANNELS  = ['Fz','C3','Cz','C4','Pz','PO7','Oz','PO8'];
+const FS        = 250;          // Hz
+const AMPLITUDE = 150;          // µV peak
+const HISTORY   = 750;          // samples to display (3 sec)
+
+const CH_COLORS = [
+  '#818cf8','#34d399','#fb923c','#f472b6',
+  '#60a5fa','#a78bfa','#fbbf24','#4ade80'
+];
+
+const BANDS = [
+  { name:'Delta', hz:'0.5–4 Hz',  lo:0.5, hi:4,  color:'#818cf8' },
+  { name:'Theta', hz:'4–8 Hz',    lo:4,   hi:8,  color:'#60a5fa' },
+  { name:'Alpha', hz:'8–13 Hz',   lo:8,   hi:13, color:'#34d399' },
+  { name:'Beta',  hz:'13–30 Hz',  lo:13,  hi:30, color:'#fb923c' },
+  { name:'Gamma', hz:'30–50 Hz',  lo:30,  hi:50, color:'#f472b6' },
+];
+
+// ── State ────────────────────────────────────────────────────
+let scale       = 150;
+let paused      = false;
+let sampleTotal = 0;
+let startTime   = Date.now();
+
+// Ring buffers — one per channel
+const buffers   = CHANNELS.map(() => new Float32Array(HISTORY).fill(0));
+const bufIdx    = new Int32Array(CHANNELS.length);
+
+// Per-channel EEG simulation state
+const simState  = CHANNELS.map((ch, i) => ({
+  alpha: { freq: 10 + (Math.random()-.5)*2, phase: Math.random()*Math.PI*2, amp: ch==='Oz'||ch==='PO7'||ch==='PO8' ? 55 : 25 },
+  beta:  { freq: 20 + (Math.random()-.5)*4, phase: Math.random()*Math.PI*2, amp: 12 },
+  theta: { freq: 6  + (Math.random()-.5)*1, phase: Math.random()*Math.PI*2, amp: 18 },
+  delta: { freq: 2  + (Math.random()-.5)*.5,phase: Math.random()*Math.PI*2, amp: ch==='Fz' ? 30 : 15 },
+  gamma: { freq: 40 + (Math.random()-.5)*5, phase: Math.random()*Math.PI*2, amp: 6 },
+  drift: { val: 0, target: 0, speed: 0.001 + Math.random()*.001 },
+  noise: 0,
+  artifact: { countdown: Math.floor(Math.random()*500+200), active:false, dur:0, amp:0 }
+}));
+
+// ── DOM build ─────────────────────────────────────────────────
+function buildUI() {
+  // Channels
+  const list = document.getElementById('channel-list');
+  CHANNELS.forEach((ch, i) => {
+    const row = document.createElement('div');
+    row.className = 'channel-row';
+    row.innerHTML = `
+      <div class="ch-label" style="color:${CH_COLORS[i]}">${ch}</div>
+      <canvas class="ch-canvas" id="canvas-${i}" height="46"></canvas>
+      <div class="ch-value" id="val-${i}">— <span>µV</span></div>
+    `;
+    list.appendChild(row);
+  });
+
+  // Quality bars
+  const qb = document.getElementById('quality-bars');
+  CHANNELS.forEach((ch, i) => {
+    qb.innerHTML += `
+      <div class="quality-row">
+        <div class="q-label" style="color:${CH_COLORS[i]}">${ch}</div>
+        <div class="q-bar-bg"><div class="q-bar" id="qbar-${i}" style="background:${CH_COLORS[i]};width:85%"></div></div>
+        <div class="q-pct" id="qpct-${i}">85%</div>
+      </div>`;
+  });
+
+  // Bands
+  const bg = document.getElementById('bands-grid');
+  BANDS.forEach((b, i) => {
+    bg.innerHTML += `
+      <div class="band-row">
+        <div class="band-header">
+          <span class="band-name">${b.name}</span>
+          <span class="band-hz">${b.hz}</span>
+          <span class="band-power-val" id="bval-${i}">0.0</span>
+        </div>
+        <div class="band-bar-bg"><div class="band-bar" id="bbar-${i}" style="background:${b.color};width:0%"></div></div>
+      </div>`;
+  });
+
+  // Impedance
+  const ig = document.getElementById('imp-grid');
+  CHANNELS.forEach((ch, i) => {
+    ig.innerHTML += `
+      <div class="imp-cell">
+        <div class="imp-ch">${ch}</div>
+        <div class="imp-val" id="imp-${i}" style="color:${CH_COLORS[i]}">—</div>
+      </div>`;
+  });
+}
+
+// ── Simulation ────────────────────────────────────────────────
+function generateSample(s, t) {
+  const a = s.alpha, b = s.beta, th = s.theta, d = s.delta, g = s.gamma;
+
+  a.phase  += (2*Math.PI*a.freq)  / FS;
+  b.phase  += (2*Math.PI*b.freq)  / FS;
+  th.phase += (2*Math.PI*th.freq) / FS;
+  d.phase  += (2*Math.PI*d.freq)  / FS;
+  g.phase  += (2*Math.PI*g.freq)  / FS;
+
+  let v = a.amp  * Math.sin(a.phase)
+        + b.amp  * Math.sin(b.phase)
+        + th.amp * Math.sin(th.phase)
+        + d.amp  * Math.sin(d.phase)
+        + g.amp  * Math.sin(g.phase);
+
+  // White noise
+  const noise = (Math.random()*2-1) * 8;
+  v += noise;
+
+  // Slow drift
+  if (Math.random() < 0.005) s.drift.target = (Math.random()*2-1)*20;
+  s.drift.val += (s.drift.target - s.drift.val) * s.drift.speed;
+  v += s.drift.val;
+
+  // Occasional eye-blink artifact on Fz
+  const art = s.artifact;
+  if (!art.active) {
+    art.countdown--;
+    if (art.countdown <= 0) {
+      art.active  = true;
+      art.dur     = Math.floor(FS * 0.3);
+      art.amp     = (Math.random() > 0.5 ? 1 : -1) * (80 + Math.random()*60);
+      art.countdown = Math.floor(Math.random()*600+300);
+      art.t       = 0;
+    }
+  } else {
+    const env = Math.sin(Math.PI * art.t / art.dur);
+    v += art.amp * env;
+    art.t++;
+    if (art.t >= art.dur) art.active = false;
+  }
+
+  return Math.max(-200, Math.min(200, v));
+}
+
+// ── Drawing ───────────────────────────────────────────────────
+function drawChannel(i) {
+  const canvas = document.getElementById('canvas-' + i);
+  if (!canvas) return;
+  const W = canvas.clientWidth * devicePixelRatio || canvas.offsetWidth * devicePixelRatio || 400;
+  const H = canvas.clientHeight * devicePixelRatio || 46 * devicePixelRatio;
+  if (canvas.width !== W) canvas.width = W;
+  if (canvas.height !== H) canvas.height = H;
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(30,37,53,0.8)';
+  ctx.lineWidth   = 1;
+  for (let x = 0; x < W; x += W/6) {
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
+
+  // Waveform
+  const buf = buffers[i];
+  const N   = HISTORY;
+  const mid = H/2;
+  const vScale = (H/2) / scale;
+
+  ctx.strokeStyle = CH_COLORS[i];
+  ctx.lineWidth   = 1.5;
+  ctx.shadowBlur  = 0;
+  ctx.beginPath();
+
+  let first = true;
+  for (let k = 0; k < N; k++) {
+    const idx = (bufIdx[i] + k) % N;
+    const sample = buf[idx];
+    const x = (k / (N-1)) * W;
+    const y = mid - sample * vScale;
+    if (first) { ctx.moveTo(x, y); first = false; }
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+// ── FFT (Goertzel approximation via sliding DFT) ──────────────
+function computeFFT(buf, idx) {
+  const N    = HISTORY;
+  const freqs = [];
+  const nBins = 64;
+  const maxFreq = 60;
+  for (let b = 1; b <= nBins; b++) {
+    const f = b * maxFreq / nBins;
+    const w = 2*Math.PI*f/FS;
+    let re=0, im=0;
+    for (let n=0; n<N; n+=4) {  // downsample for perf
+      const s = buf[(idx+n)%N];
+      re += s*Math.cos(w*n);
+      im -= s*Math.sin(w*n);
+    }
+    freqs.push(Math.sqrt(re*re+im*im)/(N/4));
+  }
+  return freqs;
+}
+
+function drawFFT() {
+  const canvas = document.getElementById('fft-canvas');
+  const W = canvas.clientWidth * devicePixelRatio || 276 * devicePixelRatio;
+  const H = canvas.height * devicePixelRatio || 80 * devicePixelRatio;
+  if (canvas.width !== W) canvas.width = W;
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+
+  const czIdx = 2; // Cz
+  const mags  = computeFFT(buffers[czIdx], bufIdx[czIdx]);
+  const maxM  = Math.max(...mags, 1);
+
+  const nBins = mags.length;
+  const bw    = W / nBins;
+
+  // Color by band
+  const bandColors = ['#818cf8','#60a5fa','#34d399','#fb923c','#f472b6'];
+  const maxFreq    = 60;
+
+  for (let b = 0; b < nBins; b++) {
+    const f = (b+1)*maxFreq/nBins;
+    let col = '#818cf8';
+    if (f<4) col=bandColors[0];
+    else if(f<8)  col=bandColors[1];
+    else if(f<13) col=bandColors[2];
+    else if(f<30) col=bandColors[3];
+    else          col=bandColors[4];
+
+    const barH = (mags[b]/maxM) * (H-4);
+    ctx.fillStyle = col + 'cc';
+    ctx.fillRect(b*bw, H-barH, bw-1, barH);
+  }
+
+  // Freq axis labels
+  ctx.fillStyle = '#475569';
+  ctx.font      = `${Math.floor(9*devicePixelRatio)}px monospace`;
+  ctx.textAlign = 'center';
+  [4,8,13,30,60].forEach(f => {
+    const x = (f/maxFreq)*W;
+    ctx.fillText(f+'Hz', x, H-1);
+  });
+}
+
+// ── Band power compute ────────────────────────────────────────
+function computeBandPower(buf, idx, lo, hi) {
+  const N = HISTORY;
+  const step = 2;
+  let power = 0, count = 0;
+  for (let f = lo; f < hi; f += (hi-lo)/12) {
+    const w = 2*Math.PI*f/FS;
+    let re=0, im=0;
+    for (let n=0; n<N; n+=step) {
+      const s = buf[(idx+n)%N];
+      re += s*Math.cos(w*n);
+      im -= s*Math.sin(w*n);
+    }
+    power += (re*re+im*im)/((N/step)*(N/step));
+    count++;
+  }
+  return Math.sqrt(power/count);
+}
+
+// ── Update loop ───────────────────────────────────────────────
+let frameCount = 0;
+const impedances = CHANNELS.map(() => (5 + Math.random()*15).toFixed(1));
+
+function update() {
+  if (!paused) {
+    // Generate one batch per frame (4 samples at 250Hz ≈ 60fps)
+    const batchSize = Math.ceil(FS/60);
+    for (let b = 0; b < batchSize; b++) {
+      CHANNELS.forEach((ch, i) => {
+        const v = generateSample(simState[i], sampleTotal);
+        buffers[i][bufIdx[i] % HISTORY] = v;
+        bufIdx[i] = (bufIdx[i]+1) % HISTORY;
+      });
+      sampleTotal++;
+    }
+  }
+
+  // Draw channels every frame
+  CHANNELS.forEach((ch, i) => {
+    drawChannel(i);
+    // Current value
+    const latest = buffers[i][(bufIdx[i]+HISTORY-1)%HISTORY];
+    const valEl  = document.getElementById('val-' + i);
+    if (valEl) {
+      valEl.innerHTML = latest.toFixed(1) + ' <span>µV</span>';
+      valEl.style.color = Math.abs(latest) > scale*0.8 ? '#f87171' : '#64748b';
+    }
+  });
+
+  // Update slower UI every 15 frames
+  if (frameCount % 15 === 0) {
+    // Signal quality (simulated, slowly varying)
+    CHANNELS.forEach((ch, i) => {
+      const buf  = buffers[i];
+      let rms = 0;
+      for (let k=0;k<HISTORY;k++) rms += buf[k]*buf[k];
+      rms = Math.sqrt(rms/HISTORY);
+      const q  = Math.min(100, Math.max(20, (rms/AMPLITUDE)*100 * (0.8+Math.random()*.4)));
+      const pct= q.toFixed(0);
+      const qbar = document.getElementById('qbar-'+i);
+      const qpct = document.getElementById('qpct-'+i);
+      if (qbar) qbar.style.width = pct+'%';
+      if (qpct) qpct.textContent = pct+'%';
+      // Color by quality
+      const color = q>70?CH_COLORS[i]:q>40?'#fbbf24':'#f87171';
+      if (qbar) qbar.style.background = color;
+    });
+
+    // Stats (use Cz channel)
+    const czBuf = buffers[2];
+    let peak=0, rmsSum=0;
+    for(let k=0;k<HISTORY;k++){
+      const v=Math.abs(czBuf[k]);
+      if(v>peak)peak=v;
+      rmsSum+=czBuf[k]*czBuf[k];
+    }
+    const rms  = Math.sqrt(rmsSum/HISTORY);
+    const snr  = 20*Math.log10(peak/(rms*0.1+0.001));
+    const drift= Math.abs(czBuf[(bufIdx[2]+HISTORY-1)%HISTORY] - czBuf[bufIdx[2]])/3;
+
+    document.getElementById('stat-peak').innerHTML  = peak.toFixed(1)  + '<span class="stat-box-unit">µV</span>';
+    document.getElementById('stat-rms').innerHTML   = rms.toFixed(1)   + '<span class="stat-box-unit">µV</span>';
+    document.getElementById('stat-snr').innerHTML   = snr.toFixed(1)   + '<span class="stat-box-unit">dB</span>';
+    document.getElementById('stat-drift').innerHTML = drift.toFixed(1) + '<span class="stat-box-unit">µV/s</span>';
+
+    // Band power (avg across all channels)
+    BANDS.forEach((band, bi) => {
+      let totalPow=0;
+      CHANNELS.forEach((_,ci)=>{
+        totalPow += computeBandPower(buffers[ci], bufIdx[ci], band.lo, band.hi);
+      });
+      const avg = totalPow/CHANNELS.length;
+      const maxPow = BANDS[0]===band?40:BANDS[2]===band?35:25;
+      const pct = Math.min(100, (avg/maxPow)*100);
+      const bar = document.getElementById('bbar-'+bi);
+      const val = document.getElementById('bval-'+bi);
+      if(bar) bar.style.width = pct.toFixed(1)+'%';
+      if(val) val.textContent = avg.toFixed(1);
+    });
+
+    // FFT
+    drawFFT();
+
+    // Impedance (slowly drift)
+    CHANNELS.forEach((ch,i)=>{
+      impedances[i] = Math.max(1, Math.min(50,
+        parseFloat(impedances[i]) + (Math.random()-.5)*0.3
+      )).toFixed(1);
+      const el = document.getElementById('imp-'+i);
+      if(el){
+        el.textContent = impedances[i];
+        const v = parseFloat(impedances[i]);
+        el.style.color = v<10?'#34d399':v<25?'#fbbf24':'#f87171';
+      }
+    });
+
+    // Sample counter & clock
+    document.getElementById('sample-count').textContent = sampleTotal.toLocaleString();
+    const elapsed = Math.floor((Date.now()-startTime)/1000);
+    const h = String(Math.floor(elapsed/3600)).padStart(2,'0');
+    const m = String(Math.floor((elapsed%3600)/60)).padStart(2,'0');
+    const s = String(elapsed%60).padStart(2,'0');
+    document.getElementById('clock').textContent = `${h}:${m}:${s}`;
+  }
+
+  frameCount++;
+  requestAnimationFrame(update);
+}
+
+// ── Controls ──────────────────────────────────────────────────
+function setScale(v) {
+  scale = v;
+  ['50','150','300'].forEach(s=>{
+    const btn = document.getElementById('scale-'+s);
+    if(btn) btn.classList.toggle('active', s==String(v));
+  });
+}
+
+function togglePause() {
+  paused = !paused;
+  const btn = document.getElementById('btn-pause');
+  if(btn) btn.textContent = paused ? '▶ Resume' : '⏸ Pause';
+  if(btn) btn.classList.toggle('active', paused);
+}
+
+// ── Init ──────────────────────────────────────────────────────
+buildUI();
+update();
+</script>
+</body>
+</html>

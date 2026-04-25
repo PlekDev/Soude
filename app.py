@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+
 from PyQt6.QtCore import (
     Qt, QTimer, QThread, pyqtSignal, QObject, pyqtSlot, QPropertyAnimation,
     QEasingCurve, QRectF, QPointF,
@@ -28,13 +30,14 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QStackedWidget, QFrame, QGraphicsDropShadowEffect,
-    QGridLayout, QProgressBar, QMessageBox, QDialog,
+    QGridLayout, QProgressBar, QMessageBox, QDialog, QSizePolicy,
 )
 
-from brain_engine import BrainEngine, MockUnicorn, SAMPLE_RATE
+from brain_engine import BrainEngine, MockUnicorn, SAMPLE_RATE, N_CHANNELS
 from Fase1.signal_processing import AuthenticationPipeline, AuthResult, EPOCH_DURATION_S
 from Fase1.stimulus_runner import StimulusRunner, ParadigmConfig
 from data_logger import SessionLogger
+from erp_viewer import ERPViewer
 
 logger = logging.getLogger(__name__)
 
@@ -62,30 +65,36 @@ UNICORN_SERIAL = os.environ.get("UNICORN_SERIAL", "")  # set to "" for mock
 DEFAULT_PASSWORD_IDS = [0, 1, 2]   # ← IDs the user focuses on (must match catalog)
 
 STIMULUS_CATALOG = [
-    # ── PASSWORD IMAGES (IDs 0, 1, 2) — make these unmistakable ──────────────
-    # (bg_color,    symbol, label   )
-    ("#AA0000",     "★",    "STAR"    ),  # 0  ← PASSWORD  — red background
-    ("#005500",     "♦",    "DIAMOND" ),  # 1  ← PASSWORD  — green background
-    ("#0033AA",     "●",    "CIRCLE"  ),  # 2  ← PASSWORD  — blue background
-
-    # ── DISTRACTOR IMAGES (IDs 3–19) — all identical dark grey ───────────────
-    ("#1C1C1C",     "",     "04"  ),  # 3
-    ("#1C1C1C",     "",     "05"  ),  # 4
-    ("#1C1C1C",     "",     "06"  ),  # 5
-    ("#1C1C1C",     "",     "07"  ),  # 6
-    ("#1C1C1C",     "",     "08"  ),  # 7
-    ("#1C1C1C",     "",     "09"  ),  # 8
-    ("#1C1C1C",     "",     "10"  ),  # 9
-    ("#1C1C1C",     "",     "11"  ),  # 10
-    ("#1C1C1C",     "",     "12"  ),  # 11
-    ("#1C1C1C",     "",     "13"  ),  # 12
-    ("#1C1C1C",     "",     "14"  ),  # 13
-    ("#1C1C1C",     "",     "15"  ),  # 14
-    ("#1C1C1C",     "",     "16"  ),  # 15
-    ("#1C1C1C",     "",     "17"  ),  # 16
-    ("#1C1C1C",     "",     "18"  ),  # 17
-    ("#1C1C1C",     "",     "19"  ),  # 18
-    ("#1C1C1C",     "",     "20"  ),  # 19
+    # ══════════════════════════════════════════════════════════════════════════
+    # ALL 20 images share the SAME background (#2E2E2E) and font size so that
+    # no low-level visual difference (luminance, colour) drives the ERP.
+    # The ONLY discriminating feature between images is their unique symbol —
+    # which only triggers a cognitive P300 in the user who chose that symbol.
+    #
+    # This eliminates Visual Evoked Potentials (VEP) that would grant access
+    # to anyone regardless of which images they are mentally attending to.
+    # ══════════════════════════════════════════════════════════════════════════
+    # (bg_color,    symbol, label      )
+    ("#2E2E2E",     "★",    "STAR"     ),  # 0
+    ("#2E2E2E",     "♦",    "DIAMOND"  ),  # 1
+    ("#2E2E2E",     "●",    "CIRCLE"   ),  # 2
+    ("#2E2E2E",     "▲",    "TRIANGLE" ),  # 3
+    ("#2E2E2E",     "♠",    "SPADE"    ),  # 4
+    ("#2E2E2E",     "♥",    "HEART"    ),  # 5
+    ("#2E2E2E",     "♣",    "CLUB"     ),  # 6
+    ("#2E2E2E",     "⬟",    "PENTA"    ),  # 7
+    ("#2E2E2E",     "✦",    "SPARK"    ),  # 8
+    ("#2E2E2E",     "⬡",    "HEX"      ),  # 9
+    ("#2E2E2E",     "⊕",    "TARGET"   ),  # 10
+    ("#2E2E2E",     "⊗",    "CROSS"    ),  # 11
+    ("#2E2E2E",     "⬤",    "DOT"      ),  # 12
+    ("#2E2E2E",     "▼",    "DOWN"     ),  # 13
+    ("#2E2E2E",     "◆",    "RHOMBUS"  ),  # 14
+    ("#2E2E2E",     "■",    "SQUARE"   ),  # 15
+    ("#2E2E2E",     "✿",    "FLOWER"   ),  # 16
+    ("#2E2E2E",     "⬢",    "BLOCK"    ),  # 17
+    ("#2E2E2E",     "☽",    "MOON"     ),  # 18
+    ("#2E2E2E",     "⬠",    "PENT2"    ),  # 19
 ]
 
 
@@ -238,6 +247,221 @@ class NeuralDivider(QFrame):
         self.setStyleSheet(f"background: {Colors.BORDER};")
 
 
+# ── Live Signal Visualizer ─────────────────────────────────────────────────────
+
+class LiveSignalVisualizerWidget(QWidget):
+    """
+    Continuously paints the last WINDOW_S seconds of raw EEG directly from the
+    ring buffer.  All 8 Unicorn channels are drawn as stacked lanes, each
+    auto-scaled to ±3σ so spikes on one channel don't crush the others.
+
+    Uses read_from() instead of snapshot() — reads only 1 000 samples (4 s ×
+    250 Hz) per refresh instead of the full 30 000-sample ring buffer, so there
+    is no performance impact on the acquisition thread.
+    """
+
+    CH_NAMES  = ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"]
+    CH_COLORS = [
+        "#00e5ff", "#7c4dff", "#00e676", "#ff5252",
+        "#ffab40", "#ea80fc", "#40c4ff", "#b2ff59",
+    ]
+    WINDOW_S  = 4
+    N_SAMPLES = SAMPLE_RATE * WINDOW_S   # 1 000 samples @ 250 Hz
+
+    def __init__(self, engine: BrainEngine, parent=None):
+        super().__init__(parent)
+        self._engine = engine
+        self._data:   Optional[np.ndarray] = None   # shape (N_SAMPLES, 8)
+
+        self.setMinimumSize(480, 240)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setStyleSheet("background: transparent;")
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._fetch)
+        self._timer.start(50)   # 20 fps
+
+    # ── Data fetch ────────────────────────────────────────────────────────────
+
+    def _fetch(self) -> None:
+        try:
+            buf   = self._engine.buffer
+            total = buf.total_written
+            n     = self.N_SAMPLES
+            if total < n:
+                return
+            data = buf.read_from(total - n, n)
+            if data is not None:
+                self._data = data
+                self.update()
+        except Exception:
+            pass
+
+    def start(self) -> None:
+        self._timer.start(50)
+
+    def stop(self) -> None:
+        self._timer.stop()
+
+    # ── Painting ──────────────────────────────────────────────────────────────
+
+    def paintEvent(self, event):
+        data = self._data
+        if data is None or len(data) == 0:
+            # Draw empty panel while waiting for data
+            painter = QPainter(self)
+            painter.fillRect(0, 0, self.width(), self.height(), QColor(Colors.BG_PANEL))
+            painter.setPen(QPen(QColor(Colors.TEXT_LO)))
+            painter.setFont(QFont("Share Tech Mono", 10))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Waiting for EEG data…")
+            painter.end()
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+
+        ml        = 38          # left margin for channel labels
+        mr        = 8
+        mt        = 6
+        mb        = 22          # bottom margin for time axis
+        plot_w    = w - ml - mr
+        plot_h    = h - mt - mb
+        ch_h      = plot_h / N_CHANNELS
+        n_samples = len(data)
+
+        # Panel background
+        painter.fillRect(0, 0, w, h, QColor(Colors.BG_PANEL))
+
+        # Outer border
+        border_pen = QPen(QColor(Colors.BORDER))
+        border_pen.setWidth(1)
+        painter.setPen(border_pen)
+        painter.drawRect(ml, mt, plot_w, plot_h)
+
+        font_label = QFont("Share Tech Mono", 8)
+        painter.setFont(font_label)
+
+        for ch in range(N_CHANNELS):
+            y_top    = mt + ch * ch_h
+            y_center = y_top + ch_h / 2
+
+            # Lane separator
+            if ch > 0:
+                sep_pen = QPen(QColor(Colors.BORDER))
+                sep_pen.setWidth(1)
+                painter.setPen(sep_pen)
+                painter.drawLine(ml, int(y_top), ml + plot_w, int(y_top))
+
+            # Channel label (left gutter)
+            painter.setPen(QPen(QColor(self.CH_COLORS[ch])))
+            painter.drawText(2, int(y_center) + 4, self.CH_NAMES[ch])
+
+            # Baseline rule
+            base_pen = QPen(QColor(30, 46, 66, 100))
+            base_pen.setWidth(1)
+            painter.setPen(base_pen)
+            painter.drawLine(ml, int(y_center), ml + plot_w, int(y_center))
+
+            # Signal trace
+            signal = data[:, ch]
+            std    = float(np.std(signal)) or 1.0
+            scale  = (ch_h * 0.42) / (3.0 * std)   # 3-sigma fills ~42 % of lane
+
+            sig_pen = QPen(QColor(self.CH_COLORS[ch]))
+            sig_pen.setWidth(1)
+            painter.setPen(sig_pen)
+
+            for i in range(1, n_samples):
+                x1 = ml + (i - 1) / n_samples * plot_w
+                x2 = ml + i       / n_samples * plot_w
+                y1 = y_center - signal[i - 1] * scale
+                y2 = y_center - signal[i]     * scale
+                # Clamp to this lane's bounds
+                y1 = max(y_top + 1,        min(y_top + ch_h - 1, y1))
+                y2 = max(y_top + 1,        min(y_top + ch_h - 1, y2))
+                painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+        # Time-axis ticks: -4s … now
+        painter.setPen(QPen(QColor(Colors.TEXT_LO)))
+        painter.setFont(QFont("Share Tech Mono", 7))
+        for t_s in range(self.WINDOW_S + 1):
+            x = ml + t_s / self.WINDOW_S * plot_w
+            painter.drawLine(int(x), mt + plot_h, int(x), mt + plot_h + 4)
+            lbl = f"-{self.WINDOW_S - t_s}s" if t_s < self.WINDOW_S else "now"
+            painter.drawText(int(x) - 12, mt + plot_h + 16, lbl)
+
+        painter.end()
+
+
+# ── Signal Monitor Screen ──────────────────────────────────────────────────────
+
+class SignalMonitorScreen(QWidget):
+    """
+    Full-screen panel that shows the live raw EEG visualizer.
+    Sits at index 5 in the QStackedWidget.
+    """
+    sig_back = pyqtSignal()
+
+    def __init__(self, engine: BrainEngine, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(f"background: {Colors.BG_DEEP};")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(32, 24, 32, 24)
+        layout.setSpacing(12)
+
+        # ── Header ────────────────────────────────────────────────────────────
+        header = QHBoxLayout()
+        title = QLabel("⚡  LIVE EEG SIGNAL MONITOR", self)
+        title.setStyleSheet(
+            f"color: {Colors.ACCENT}; font-size: 16px; font-weight: 700; "
+            f"font-family: 'Share Tech Mono', monospace; letter-spacing: 4px;"
+        )
+        shadow = QGraphicsDropShadowEffect(title)
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(Colors.ACCENT))
+        shadow.setOffset(0, 0)
+        title.setGraphicsEffect(shadow)
+        header.addWidget(title)
+        header.addStretch()
+
+        self._sample_lbl = QLabel(f"{SAMPLE_RATE} Hz  ·  {N_CHANNELS} ch  ·  4 s window", self)
+        self._sample_lbl.setStyleSheet(
+            f"color: {Colors.TEXT_LO}; font-size: 11px; "
+            f"font-family: 'Share Tech Mono', monospace;"
+        )
+        header.addWidget(self._sample_lbl)
+        layout.addLayout(header)
+        layout.addWidget(NeuralDivider())
+
+        # ── Visualizer ────────────────────────────────────────────────────────
+        self.visualizer = LiveSignalVisualizerWidget(engine, self)
+        layout.addWidget(self.visualizer, stretch=1)
+
+        layout.addWidget(NeuralDivider())
+
+        # ── Footer ────────────────────────────────────────────────────────────
+        footer = QHBoxLayout()
+        hint = QLabel(
+            "Each channel auto-scaled to ±3σ  •  Traces refresh at 20 Hz  •  "
+            "No raw data is written to disk from this view",
+            self,
+        )
+        hint.setStyleSheet(
+            f"color: {Colors.TEXT_LO}; font-size: 10px; "
+            f"font-family: 'Share Tech Mono', monospace;"
+        )
+        footer.addWidget(hint)
+        footer.addStretch()
+
+        btn_back = GlowButton("←  BACK", Colors.ACCENT2)
+        btn_back.setFixedWidth(180)
+        btn_back.clicked.connect(self.sig_back)
+        footer.addWidget(btn_back)
+        layout.addLayout(footer)
+
+
 # ── Stimulus Flash Screen ──────────────────────────────────────────────────────
 
 class StimulusScreen(QWidget):
@@ -293,39 +517,35 @@ class StimulusScreen(QWidget):
                 self._cache[img_id] = px
                 continue
 
-            # ── Generated placeholder from STIMULUS_CATALOG ───────────────────
+            # ── Generated image from STIMULUS_CATALOG ────────────────────────
+            # All 20 images: SAME background, SAME font size, SAME colour.
+            # Only the symbol and label text differ — so the ERP difference
+            # between target and non-target images is purely cognitive (P300),
+            # not a low-level Visual Evoked Potential (VEP) response to
+            # brightness or colour changes.
             bg_hex, symbol, label = STIMULUS_CATALOG[img_id]
             px = QPixmap(target_size, target_size)
             px.fill(QColor(bg_hex))
             painter = QPainter(px)
 
-            if symbol:
-                # PASSWORD image: large symbol + word label centred
-                font_sym = QFont("Segoe UI Symbol", 150, QFont.Weight.Bold)
-                painter.setFont(font_sym)
-                painter.setPen(QColor(255, 255, 255))
-                painter.drawText(
-                    0, 20, target_size, 300,
-                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
-                    symbol,
-                )
-                font_lbl = QFont("Arial", 54, QFont.Weight.Bold)
-                painter.setFont(font_lbl)
-                painter.setPen(QColor(255, 255, 255, 210))
-                painter.drawText(
-                    0, 320, target_size, 120,
-                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
-                    label,
-                )
-            else:
-                # DISTRACTOR image: tiny ID number in bottom-right corner only
-                font_id = QFont("Arial", 18)
-                painter.setFont(font_id)
-                painter.setPen(QColor(70, 70, 70))
-                painter.drawText(
-                    target_size - 44, target_size - 10,
-                    label,
-                )
+            # Large centred symbol — identical font size for every image
+            font_sym = QFont("Segoe UI Symbol", 150, QFont.Weight.Bold)
+            painter.setFont(font_sym)
+            painter.setPen(QColor(255, 255, 255))
+            painter.drawText(
+                0, 20, target_size, 300,
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+                symbol,
+            )
+            # Label text below symbol — same font, same colour, same position
+            font_lbl = QFont("Arial", 54, QFont.Weight.Bold)
+            painter.setFont(font_lbl)
+            painter.setPen(QColor(255, 255, 255, 210))
+            painter.drawText(
+                0, 320, target_size, 120,
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+                label,
+            )
 
             painter.end()
             self._cache[img_id] = px
@@ -337,11 +557,14 @@ class StimulusScreen(QWidget):
         if px:
             self._img_label.setPixmap(px)
         self._status.setText(f"[ {image_id:02d} ]")
+        # Force synchronous repaint — don't wait for the next event-loop cycle
+        self._img_label.repaint()
 
     @pyqtSlot()
     def show_blank(self):
         self._img_label.clear()
         self._status.setText("")
+        self._img_label.repaint()
 
     def set_progress(self, value: int):
         self._progress.setValue(value)
@@ -365,74 +588,115 @@ class ResultScreen(QWidget):
         super().__init__(parent)
         self.setStyleSheet(f"background: {Colors.BG_DEEP};")
 
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.setSpacing(24)
-        layout.setContentsMargins(60, 60, 60, 60)
+        # ── Main layout: verdict panel left, ERP plot right ────────────────────
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(40, 30, 40, 30)
+        outer.setSpacing(32)
+
+        # ── Left: verdict ──────────────────────────────────────────────────────
+        left = QVBoxLayout()
+        left.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        left.setSpacing(18)
 
         self._icon = QLabel("", self)
         self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._icon.setStyleSheet("font-size: 96px;")
-        layout.addWidget(self._icon)
+        left.addWidget(self._icon)
 
         self._title = QLabel("", self)
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._title.setStyleSheet(
-            f"font-size: 36px; font-weight: 700; color: {Colors.TEXT_HI}; "
+            f"font-size: 32px; font-weight: 700; color: {Colors.TEXT_HI}; "
             f"font-family: 'Exo 2', 'Segoe UI', sans-serif; letter-spacing: 4px;"
         )
-        layout.addWidget(self._title)
+        left.addWidget(self._title)
 
         self._detail = QLabel("", self)
         self._detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._detail.setWordWrap(True)
+        self._detail.setMaximumWidth(340)
         self._detail.setStyleSheet(
-            f"font-size: 15px; color: {Colors.TEXT_LO}; "
+            f"font-size: 12px; color: {Colors.TEXT_LO}; "
             f"font-family: 'Share Tech Mono', monospace;"
         )
-        layout.addWidget(self._detail)
+        left.addWidget(self._detail)
 
-        layout.addWidget(NeuralDivider())
+        left.addWidget(NeuralDivider())
 
         btn_row = QHBoxLayout()
-        self._btn_retry      = GlowButton("⟳  RETRY SCAN", Colors.ACCENT)
+        btn_row.setSpacing(10)
+        self._btn_retry      = GlowButton("⟳  RETRY", Colors.ACCENT)
         self._btn_back       = GlowButton("←  BACK", Colors.TEXT_LO)
         self._btn_open_vault = GlowButton("▶  OPEN VAULT", Colors.SUCCESS)
-        self._btn_retry.clicked.connect(self.sig_retry)
-        self._btn_back.clicked.connect(self.sig_back)
-        self._btn_open_vault.clicked.connect(self.sig_open_vault)
+        self._btn_retry.clicked.connect(self._on_retry)
+        self._btn_back.clicked.connect(self._on_back)
+        self._btn_open_vault.clicked.connect(self._on_open_vault)
         btn_row.addWidget(self._btn_back)
         btn_row.addWidget(self._btn_retry)
         btn_row.addWidget(self._btn_open_vault)
-        layout.addLayout(btn_row)
+        left.addLayout(btn_row)
 
-    def show_result(self, result: AuthResult):
+        outer.addLayout(left, stretch=0)
+
+        # ── Vertical divider ───────────────────────────────────────────────────
+        vdiv = QFrame(self)
+        vdiv.setFixedWidth(1)
+        vdiv.setStyleSheet(f"background: {Colors.BORDER};")
+        outer.addWidget(vdiv)
+
+        # ── Right: live ERP viewer ─────────────────────────────────────────────
+        self._erp_viewer = ERPViewer(parent=self)
+        outer.addWidget(self._erp_viewer, stretch=1)
+
+    # ── Internal slot wrappers — stop ERP refresh before emitting nav signals ──
+
+    def _on_retry(self):
+        self._erp_viewer.stop_live()
+        self.sig_retry.emit()
+
+    def _on_back(self):
+        self._erp_viewer.stop_live()
+        self.sig_back.emit()
+
+    def _on_open_vault(self):
+        self._erp_viewer.stop_live()
+        self.sig_open_vault.emit()
+
+    # ── Public API ─────────────────────────────────────────────────────────────
+
+    def show_result(self, result: AuthResult, pipeline=None):
+        """Populate the verdict panel and kick the ERP display."""
         if result.granted:
             self._icon.setText("🔓")
             self._title.setText("ACCESS GRANTED")
             self._title.setStyleSheet(
-                f"font-size: 36px; font-weight: 700; color: {Colors.SUCCESS}; "
+                f"font-size: 32px; font-weight: 700; color: {Colors.SUCCESS}; "
                 f"font-family: 'Exo 2', 'Segoe UI', sans-serif; letter-spacing: 4px;"
             )
-            # Show vault button, hide retry
             self._btn_open_vault.setVisible(True)
             self._btn_retry.setVisible(False)
         else:
             self._icon.setText("🔒")
             self._title.setText("ACCESS DENIED")
             self._title.setStyleSheet(
-                f"font-size: 36px; font-weight: 700; color: {Colors.DANGER}; "
+                f"font-size: 32px; font-weight: 700; color: {Colors.DANGER}; "
                 f"font-family: 'Exo 2', 'Segoe UI', sans-serif; letter-spacing: 4px;"
             )
-            # Show retry button, hide vault
             self._btn_open_vault.setVisible(False)
             self._btn_retry.setVisible(True)
+
         self._detail.setText(
             f"{result.message}\n\n"
-            f"Target P300: {result.target_peak_uv:.2f} µV  |  "
-            f"Non-target: {result.nontarget_peak_uv:.2f} µV  |  "
+            f"Target: {result.target_peak_uv:.2f} µV  |  "
+            f"Non-target: {result.nontarget_peak_uv:.2f} µV\n"
             f"SNR: {result.snr_db:.1f} dB"
         )
+
+        # Wire up and start the live ERP plot (refreshes every 400 ms so the
+        # waveform appears to "settle" cinematically after the scan ends)
+        if pipeline is not None:
+            self._erp_viewer.set_pipeline(pipeline)
+            self._erp_viewer.start_live(interval_ms=400)
 
 
 # ── Vault Screen ───────────────────────────────────────────────────────────────
@@ -646,14 +910,10 @@ class EnrollmentScreen(QWidget):
         px = QPixmap(self._THUMB, self._THUMB)
         px.fill(QColor(bg_hex))
         painter = QPainter(px)
-        if symbol:
-            painter.setFont(QFont("Segoe UI Symbol", 36, QFont.Weight.Bold))
-            painter.setPen(QColor(255, 255, 255))
-            painter.drawText(px.rect(), Qt.AlignmentFlag.AlignCenter, symbol)
-        else:
-            painter.setFont(QFont("Arial", 14))
-            painter.setPen(QColor(80, 80, 80))
-            painter.drawText(px.rect(), Qt.AlignmentFlag.AlignCenter, str(img_id))
+        # All catalog entries have symbols — same font/colour for every thumbnail
+        painter.setFont(QFont("Segoe UI Symbol", 36, QFont.Weight.Bold))
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(px.rect(), Qt.AlignmentFlag.AlignCenter, symbol)
         painter.end()
         return QIcon(px)
 
@@ -696,6 +956,7 @@ class EnrollmentScreen(QWidget):
 class HomeScreen(QWidget):
     sig_start_auth = pyqtSignal()
     sig_enroll     = pyqtSignal()
+    sig_monitor    = pyqtSignal()   # open live signal monitor
 
     _CH_NAMES = ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"]
 
@@ -799,6 +1060,11 @@ class HomeScreen(QWidget):
         self._btn_enroll.clicked.connect(self.sig_enroll)
         layout.addWidget(self._btn_enroll, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        self._btn_monitor = GlowButton("📊  SIGNAL MONITOR", Colors.TEXT_LO)
+        self._btn_monitor.setFixedWidth(360)
+        self._btn_monitor.clicked.connect(self.sig_monitor)
+        layout.addWidget(self._btn_monitor, alignment=Qt.AlignmentFlag.AlignCenter)
+
         hint = QLabel(
             "Focus on the images you chose as your password.\n"
             "Keep still. Blink minimally during the scan.", self
@@ -860,25 +1126,29 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget(self)
         self.setCentralWidget(self._stack)
 
-        self._home_screen       = HomeScreen(self)
-        self._stimulus_screen   = StimulusScreen(self)
-        self._result_screen     = ResultScreen(self)
-        self._vault_screen      = VaultScreen(self)
-        self._enrollment_screen = EnrollmentScreen(self)
+        self._home_screen          = HomeScreen(self)
+        self._stimulus_screen      = StimulusScreen(self)
+        self._result_screen        = ResultScreen(self)
+        self._vault_screen         = VaultScreen(self)
+        self._enrollment_screen    = EnrollmentScreen(self)
+        self._signal_monitor_screen = SignalMonitorScreen(self._engine, self)
 
-        self._stack.addWidget(self._home_screen)       # 0
-        self._stack.addWidget(self._stimulus_screen)   # 1
-        self._stack.addWidget(self._result_screen)     # 2
-        self._stack.addWidget(self._vault_screen)      # 3
-        self._stack.addWidget(self._enrollment_screen) # 4
+        self._stack.addWidget(self._home_screen)            # 0
+        self._stack.addWidget(self._stimulus_screen)        # 1
+        self._stack.addWidget(self._result_screen)          # 2
+        self._stack.addWidget(self._vault_screen)           # 3
+        self._stack.addWidget(self._enrollment_screen)      # 4
+        self._stack.addWidget(self._signal_monitor_screen)  # 5
 
         self._home_screen.sig_start_auth.connect(self._start_authentication)
         self._home_screen.sig_enroll.connect(self._go_enrollment)
+        self._home_screen.sig_monitor.connect(self._go_signal_monitor)
         self._result_screen.sig_retry.connect(self._start_authentication)
         self._result_screen.sig_back.connect(self._go_home)
         self._result_screen.sig_open_vault.connect(self._open_vault)
         self._vault_screen.sig_lock.connect(self._go_home)
         self._enrollment_screen.sig_confirmed.connect(self._on_enrollment_done)
+        self._signal_monitor_screen.sig_back.connect(self._go_home)
 
         self._sq_timer = QTimer(self)
         self._sq_timer.timeout.connect(self._update_signal_quality)
@@ -906,7 +1176,13 @@ class MainWindow(QMainWindow):
             self._home_screen.set_device_ready(True, "SIMULATOR (fallback)")
 
     def _go_home(self):
+        # Pause the signal visualizer if it was running to save CPU
+        self._signal_monitor_screen.visualizer.stop()
         self._stack.setCurrentIndex(0)
+
+    def _go_signal_monitor(self):
+        self._signal_monitor_screen.visualizer.start()
+        self._stack.setCurrentIndex(5)
 
     def _open_vault(self):
         self._stack.setCurrentIndex(3)
@@ -938,6 +1214,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Device Error", f"EEG device error:\n{exc}")
             return
 
+        # Stop signal-quality timer — its 1.9 MB snapshot every 1.5 s on the main
+        # thread competes with stimulus rendering and causes timing jitter.
+        self._sq_timer.stop()
+
         self._engine.clear_markers()
         self._stimulus_screen.set_status("PREPARING NEURAL SCAN…", Colors.TEXT_LO)
         self._stack.setCurrentIndex(1)
@@ -952,6 +1232,8 @@ class MainWindow(QMainWindow):
 
         self._paradigm_thread.started.connect(self._worker.run)
         self._paradigm_thread.start()
+        # setPriority must be called AFTER start() — thread must be running
+        self._paradigm_thread.setPriority(QThread.Priority.TimeCriticalPriority)
 
         self._stimulus_screen.set_status("SCANNING…  FOCUS ON YOUR KEY IMAGES", Colors.ACCENT)
 
@@ -960,7 +1242,11 @@ class MainWindow(QMainWindow):
         if self._paradigm_thread:
             self._paradigm_thread.quit()
             self._paradigm_thread.wait()
-        self._result_screen.show_result(result)
+        # Restart signal-quality polling now that the paradigm is done
+        self._sq_timer.start(1500)
+        # Pass the pipeline so ResultScreen can drive the live ERP plot
+        pipeline = self._worker._pipeline if self._worker else None
+        self._result_screen.show_result(result, pipeline=pipeline)
         self._stack.setCurrentIndex(2)
 
     def closeEvent(self, event):
@@ -979,6 +1265,53 @@ def main():
         level=logging.INFO,
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
     )
+
+    # ── Windows: set timer resolution to 1 ms ─────────────────────────────────
+    # Default Windows timer granularity is 15.6 ms, which causes large scheduling
+    # jitter in the stimulus timing thread.  timeBeginPeriod(1) requests 1 ms
+    # resolution for the lifetime of this process.
+    try:
+        import ctypes
+        ctypes.windll.winmm.timeBeginPeriod(1)
+        logger.info("Windows timer resolution set to 1 ms.")
+    except Exception:
+        pass   # Non-Windows or call not available — acceptable
+
+    app = QApplication(sys.argv)
+    app.setApplicationName("Neuro-Lock")
+    try:
+        for font_path in (Path(__file__).parent / "assets" / "fonts").glob("*.ttf"):
+            QFontDatabase.addApplicationFont(str(font_path))
+    except Exception:
+        pass
+    win = MainWindow()
+    win.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
+
+
+# ── Entry Point ───────────────────────────────────────────────────────────────
+
+def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    )
+
+    # ── Windows: set timer resolution to 1 ms ────────────────────────────────
+    # Default Windows timer granularity is 15.6 ms, which causes large scheduling
+    # jitter in the stimulus timing thread.  timeBeginPeriod(1) requests 1 ms
+    # resolution for the lifetime of this process.
+    try:
+        import ctypes
+        ctypes.windll.winmm.timeBeginPeriod(1)
+        logger.info("Windows timer resolution set to 1 ms.")
+    except Exception:
+        pass   # Non-Windows or call not available — acceptable
+
     app = QApplication(sys.argv)
     app.setApplicationName("Neuro-Lock")
     try:

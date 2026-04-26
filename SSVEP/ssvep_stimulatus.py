@@ -1,5 +1,7 @@
 import pygame
 import sys
+from pylsl import StreamInfo, StreamOutlet
+import time
 
 # --- Configuración Crítica ---
 FREQ_OBJETIVO = 15  # Frecuencia SSVEP deseada en Hz
@@ -47,6 +49,13 @@ def main():
     print(f"Basado en un monitor de {FPS_MONITOR} Hz. Ciclo: {frames_por_ciclo} frames.")
     print("Presiona ESC para salir.")
 
+    print("Creando stream de marcadores LSL...")
+    # Creamos un stream de tipo 'Markers' que envía strings (texto) de forma irregular (0 Hz)
+    info_marcador = StreamInfo('SSVEP_Marcadores', 'Markers', 1, 0, 'string', 'estimulo_15hz')
+    outlet_marcador = StreamOutlet(info_marcador)
+
+    marcador_enviado = False
+
     while corriendo:
         # Manejo de eventos (como salir)
         for evento in pygame.event.get():
@@ -72,6 +81,13 @@ def main():
 
         # Volcar el dibujo a la pantalla física (espera automáticamente al V-Sync)
         pygame.display.flip()
+        
+        # Enviar el marcador EXACTAMENTE después del primer dibujo en pantalla
+        if not marcador_enviado:
+            # Enviamos una lista con un solo string
+            outlet_marcador.push_sample(['INICIO_15HZ'])
+            print("¡Marcador 'INICIO_15HZ' enviado a la red!")
+            marcador_enviado = True
 
         contador_frames += 1
         

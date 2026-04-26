@@ -105,7 +105,7 @@ Python 3.10+ recommended (uses `list[int]` type hints throughout).
 ## Installation
 
 ```bash
-git clone https://github.com/<your-team>/neuro-lock.git
+git clone https://github.com/PlekDev/Soude.git
 cd neuro-lock
 pip install numpy scipy PyQt6
 ```
@@ -217,6 +217,215 @@ All key parameters are documented in-file. The most important ones to tune when 
 | `N_CHANNELS` | `8` | EEG channels (Fz, C3, Cz, C4, Pz, PO7, Oz, PO8). |
 | `BUFFER_SECONDS` | `120 s` | Ring buffer — must exceed paradigm + enrollment time (~1.9 MB, negligible). |
 | `GETDATA_BLOCK` | `4 samples` | Pull size (~16 ms latency). Reduce to 1 for minimum latency. |
+
+---
+
+## UI Customization (PyQt6)
+
+The interface uses a cyberpunk/neuro aesthetic built entirely with PyQt6. Below are the key techniques used to achieve the look and feel shown in the app.
+
+### Window Icon & Title
+
+```python
+self.setWindowTitle("NEURO-LOCK")
+self.setWindowIcon(QIcon("assets/brain_icon.png"))
+```
+
+Place a 256×256 PNG in `assets/` for best results. On Windows, an `.ico` file is preferred:
+
+```python
+from PIL import Image
+img = Image.open("assets/brain_icon.png")
+img.save("assets/brain_icon.ico", format="ICO", sizes=[(256,256),(64,64),(32,32)])
+```
+
+### Custom Fonts
+
+Download **Orbitron** and **Share Tech Mono** from [Google Fonts](https://fonts.google.com/) and place them in `assets/fonts/`. Load them at startup before any window is created:
+
+```python
+def load_custom_fonts():
+    fonts_dir = Path("assets/fonts")
+    for font_file in fonts_dir.glob("*.ttf"):
+        QFontDatabase.addApplicationFont(str(font_file))
+
+# In main(), before QMainWindow instantiation
+load_custom_fonts()
+
+# Usage
+label.setFont(QFont("Orbitron", 28, QFont.Weight.Bold))
+```
+
+### Global Stylesheet
+
+Apply a single stylesheet to `QApplication` so all widgets inherit the theme:
+
+```python
+NEURO_STYLESHEET = """
+QMainWindow, QWidget#centralWidget {
+    background-color: #050505;
+}
+QWidget {
+    font-family: 'Share Tech Mono', monospace;
+    color: #b4ff00;
+}
+QPushButton {
+    background-color: transparent;
+    border: 1px solid #b4ff00;
+    border-radius: 4px;
+    color: #b4ff00;
+    font-family: 'Share Tech Mono';
+    font-size: 13px;
+    letter-spacing: 3px;
+    padding: 14px 24px;
+}
+QPushButton:hover {
+    background-color: rgba(180, 255, 0, 0.08);
+    border-color: #ccff33;
+    color: #ffffff;
+}
+QPushButton:pressed {
+    background-color: rgba(180, 255, 0, 0.2);
+}
+QPushButton:disabled {
+    border-color: #333;
+    color: #333;
+}
+QLabel#titleLabel {
+    color: #b4ff00;
+    font-family: 'Orbitron';
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: 8px;
+}
+QFrame#panel {
+    background-color: #0d0d0d;
+    border: 1px solid rgba(180, 255, 0, 0.25);
+    border-radius: 6px;
+}
+QProgressBar {
+    background-color: #111;
+    border: 1px solid rgba(180, 255, 0, 0.3);
+    border-radius: 3px;
+    height: 6px;
+}
+QProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #4dff00, stop:1 #b4ff00);
+    border-radius: 3px;
+}
+"""
+
+app = QApplication(sys.argv)
+app.setStyleSheet(NEURO_STYLESHEET)
+```
+
+### Glow Effect on Key Widgets
+
+```python
+def add_glow(widget: QWidget, color: str = "#b4ff00", radius: int = 20) -> None:
+    effect = QGraphicsDropShadowEffect()
+    effect.setBlurRadius(radius)
+    effect.setColor(QColor(color))
+    effect.setOffset(0, 0)
+    widget.setGraphicsEffect(effect)
+
+# Usage
+add_glow(self.title_label, radius=30)
+add_glow(self.scan_button, radius=15)
+```
+
+> **Note:** PyQt6 allows only one `QGraphicsEffect` per widget. Adding a second replaces the first.
+
+### Frameless Window with Drag Support
+
+Remove the native OS title bar and implement custom dragging:
+
+```python
+class NeurolockWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._drag_pos = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos:
+            delta = event.globalPosition().toPoint() - self._drag_pos
+            self.move(self.pos() + delta)
+            self._drag_pos = event.globalPosition().toPoint()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+```
+
+### Signal Badge Pulse Animation
+
+The EEG channel badges (Fz, C3, Cz…) animate when a signal is active:
+
+```python
+# In your QSS, add a named class or use objectName
+# In Python, toggle a property and call style().unpolish/polish to re-apply
+badge.setProperty("active", True)
+badge.style().unpolish(badge)
+badge.style().polish(badge)
+```
+
+```css
+/* QSS for active badge */
+QPushButton[active="true"] {
+    background-color: #b4ff00;
+    color: #050505;
+    border-color: #b4ff00;
+}
+```
+
+### Design Token Reference
+
+Centralise all theme values to avoid magic numbers scattered throughout the code:
+
+```python
+THEME = {
+    "accent":       "#b4ff00",
+    "accent_dim":   "rgba(180, 255, 0, 0.25)",
+    "bg_primary":   "#050505",
+    "bg_secondary": "#0d0d0d",
+    "text_primary": "#b4ff00",
+    "text_muted":   "#555555",
+    "font_display": "Orbitron",
+    "font_mono":    "Share Tech Mono",
+    "radius":       "4px",
+    "glow_radius":  20,
+}
+```
+
+### Asset Folder Structure
+
+```
+neuro-lock/
+├── assets/
+│   ├── fonts/
+│   │   ├── Orbitron-Bold.ttf
+│   │   └── ShareTechMono-Regular.ttf
+│   ├── images/
+│   │   └── 00.png … 19.png
+│   ├── brain_icon.png    ← 256×256, used on Linux/macOS
+│   └── brain_icon.ico    ← multi-size, used on Windows
+```
+
+### Packaging with PyInstaller
+
+Bundle the app into a single executable with the custom icon included:
+
+```bash
+pyinstaller --onefile --windowed --icon=assets/brain_icon.ico app.py
+```
+
+Add `--add-data "assets;assets"` (Windows) or `--add-data "assets:assets"` (macOS/Linux) to bundle the fonts and images.
 
 ---
 

@@ -1,67 +1,85 @@
+import pygame
 import sys
-import time
-from PyQt5 import QtWidgets, QtCore, QtGui
 
-class SSVEP_Display(QtWidgets.QWidget):
-    def __init__(self, frequency=15.0):
-        super().__init__()
-        self.freq = frequency
-        
-        # Calculamos la duración exacta de medio ciclo (tiempo en Blanco o Negro)
-        self.period = 1.0 / self.freq
-        self.half_period = self.period / 2.0
-        
-        # Variables de estado
-        self.is_white = False
-        self.last_flip_time = time.perf_counter()
-        
-        self.init_ui()
-        
-    def init_ui(self):
-        self.setWindowTitle(f"SSVEP Passthought - {self.freq} Hz")
-        # Fondo inicial negro
-        self.setStyleSheet("background-color: black;")
-        
-        # Usamos un timer de alta precisión corriendo a 1ms
-        # Actúa como un bucle de juego para interceptar el momento exacto del cambio
-        self.timer = QtCore.QTimer(self)
-        self.timer.setTimerType(QtCore.Qt.PreciseTimer)
-        self.timer.timeout.connect(self.check_flip)
-        self.timer.start(1)
-        
-    def check_flip(self):
-        current_time = time.perf_counter()
-        
-        # Si el tiempo transcurrido superó la mitad del periodo, invertimos el color
-        if (current_time - self.last_flip_time) >= self.half_period:
-            self.is_white = not self.is_white
-            
-            # CRÍTICO: Sumamos el half_period en lugar de igualar a current_time
-            # Esto evita que los micro-retrasos del procesador se acumulen con el tiempo
-            self.last_flip_time += self.half_period 
-            
-            if self.is_white:
-                self.setStyleSheet("background-color: white;")
-            else:
-                self.setStyleSheet("background-color: black;")
+# --- Configuración Crítica ---
+FREQ_OBJETIVO = 15  # Frecuencia SSVEP deseada en Hz
+FPS_MONITOR = 60    # CAMBIA ESTO a 120 si configuraste tu monitor a 120Hz
 
-    def keyPressEvent(self, event):
-        # Permitir salir fácilmente presionando la tecla Escape
-        if event.key() == QtCore.Qt.Key_Escape:
-            self.close()
+# Cálculo exacto de frames por ciclo
+frames_por_ciclo = FPS_MONITOR // FREQ_OBJETIVO
+frames_mitad = frames_por_ciclo // 2
 
-if __name__ == '__main__':
-    app = QtWidgets.QApplication(sys.argv)
+def main():
+    # Inicializar Pygame
+    pygame.init()
     
-    # Forzar la sincronización con el refresco de la pantalla (VSync)
-    format = QtGui.QSurfaceFormat()
-    format.setSwapInterval(1)
-    QtGui.QSurfaceFormat.setDefaultFormat(format)
+    # Es fundamental activar DOUBLEBUF y vsync=1 para amarrarnos al hardware
+    # Usamos FULLSCREEN para máxima inmersión
+    flags = pygame.FULLSCREEN | pygame.DOUBLEBUF | pygame.HWSURFACE
     
-    # Iniciar la ventana a 15 Hz
-    window = SSVEP_Display(frequency=15.0)
+    try:
+        # Intentamos forzar V-Sync (solo funciona en pygame 2.0+)
+        pantalla = pygame.display.set_mode((0, 0), flags, vsync=1)
+    except Exception as e:
+        print("Advertencia: No se pudo forzar V-Sync estricto. Revisa tu compositor en Arch.")
+        pantalla = pygame.display.set_mode((0, 0), flags)
+
+    reloj = pygame.time.Clock()
+
+    # Colores
+    blanco = (255, 255, 255)
+    negro = (0, 0, 0)
     
-    # FullScreen inmersivo es clave para que el estímulo sature el campo visual
-    window.showFullScreen() 
-    
-    sys.exit(app.exec())
+    # Opcional: En lugar de toda la pantalla, podemos dibujar un cuadrado en el centro
+    # para que sea menos agotador visualmente.
+    ancho_pantalla, alto_pantalla = pantalla.get_size()
+    tamano_cuadrado = 400
+    rect_centro = pygame.Rect(
+        (ancho_pantalla // 2) - (tamano_cuadrado // 2),
+        (alto_pantalla // 2) - (tamano_cuadrado // 2),
+        tamano_cuadrado, tamano_cuadrado
+    )
+
+    contador_frames = 0
+    corriendo = True
+
+    print(f"Iniciando estímulo a {FREQ_OBJETIVO} Hz...")
+    print(f"Basado en un monitor de {FPS_MONITOR} Hz. Ciclo: {frames_por_ciclo} frames.")
+    print("Presiona ESC para salir.")
+
+    while corriendo:
+        # Manejo de eventos (como salir)
+        for evento in pygame.event.get():
+            if evento.type == pygame.KEYDOWN:
+                if evento.key == pygame.K_ESCAPE:
+                    corriendo = False
+
+        # --- Lógica basada en Hardware (Frames) ---
+        # Si estamos en la primera mitad del ciclo, pintamos blanco; si no, negro.
+        if contador_frames % frames_por_ciclo < frames_mitad:
+            color_actual = blanco
+        else:
+            color_actual = negro
+
+        # Dibujar (Elige una de las dos opciones)
+        
+        # Opción 1: Pantalla completa (Estímulo muy fuerte)
+        # pantalla.fill(color_actual)
+        
+        # Opción 2: Solo un cuadrado en el centro (Más cómodo, fondo gris oscuro)
+        pantalla.fill((20, 20, 20)) 
+        pygame.draw.rect(pantalla, color_actual, rect_centro)
+
+        # Volcar el dibujo a la pantalla física (espera automáticamente al V-Sync)
+        pygame.display.flip()
+
+        contador_frames += 1
+        
+        # Le decimos a Pygame que no exceda los FPS del monitor
+        reloj.tick(FPS_MONITOR)
+
+    pygame.quit()
+    sys.exit()
+
+if __name__ == "__main__":
+    main()

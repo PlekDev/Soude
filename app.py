@@ -1,5 +1,5 @@
 """
-app.py — Neuro-Lock Main Application (PyQt6)
+app.py — Soude Main Application (PyQt6)
 High-speed stimulus display, enrollment wizard, and vault screen.
 Sub-team 3 (UX/UI) owns this file.
 """
@@ -121,7 +121,7 @@ class Colors:
     BORDER     = "#242424"
 
 
-NEURO_STYLESHEET = f"""
+SOUDE_STYLESHEET = f"""
 QMainWindow {{
     background-color: {Colors.BG_DEEP};
 }}
@@ -806,7 +806,7 @@ def load_custom_fonts():
         QFontDatabase.addApplicationFont(str(font_file))
 
 # Uso
-label = QLabel("NEURO-LOCK")
+label = QLabel("SOUDE")
 label.setFont(QFont("Orbitron", 28, QFont.Weight.Bold))
 
 # ── Vault Screen ───────────────────────────────────────────────────────────────
@@ -1113,7 +1113,7 @@ class HomeScreen(QWidget):
         self._pulse_anim.setEasingCurve(QEasingCurve.Type.InOutSine)
         self._pulse_anim.start()
 
-        title = QLabel("NEURO-LOCK", self)
+        title = QLabel("SOUDE", self)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
             f"color: {Colors.ACCENT}; font-size: 48px; font-weight: 800; "
@@ -1275,7 +1275,7 @@ class TitleBar(QWidget):
             ico.setStyleSheet("background: transparent; border: none;")
             lay.addWidget(ico)
 
-        name = QLabel("NEURO-LOCK", self)
+        name = QLabel("SOUDE", self)
         name.setStyleSheet(
             f"color: {Colors.TEXT_LO}; font-size: 10px; letter-spacing: 4px; "
             f"font-family: 'Share Tech Mono', monospace; "
@@ -1346,7 +1346,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
-        self.setWindowTitle("Neuro-Lock")
+        self.setWindowTitle("Soude")
         self.setMinimumSize(1024, 768)
         self.setStyleSheet(f"background: {Colors.BG_DEEP};")
         _icon_path = Path(__file__).parent / "assets" / "logo.png"
@@ -1528,7 +1528,7 @@ def main():
         pass   # Non-Windows or call not available — acceptable
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Neuro-Lock")
+    app.setApplicationName("Soude")
     _app_icon = Path(__file__).parent / "assets" / "logo.png"
     if _app_icon.exists():
         app.setWindowIcon(QIcon(str(_app_icon)))
@@ -1537,7 +1537,7 @@ def main():
             QFontDatabase.addApplicationFont(str(font_path))
     except Exception:
         pass
-    app.setStyleSheet(NEURO_STYLESHEET)
+    app.setStyleSheet(SOUDE_STYLESHEET)
     win = MainWindow()
     win.show()
     sys.exit(app.exec())

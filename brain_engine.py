@@ -1,5 +1,5 @@
 """
-brain_engine.py — Neuro-Lock BCI Core Controller
+brain_engine.py — Soude BCI Core Controller
 Manages UnicornPy device lifecycle, ring buffer, and stimulus synchronization.
 Sub-team 1 (Hardware/API) owns this file.
 """

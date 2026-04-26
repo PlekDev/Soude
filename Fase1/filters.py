@@ -1,5 +1,5 @@
 """
-filters.py — Neuro-Lock Filter Construction
+filters.py — Soude Filter Construction
 Builds the SOS filter chain used by signal_processing.py.
 Sub-team 2 (Signal/Math) owns this file.
 """

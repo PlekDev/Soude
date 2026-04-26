@@ -1,5 +1,5 @@
 """
-stimulus_runner.py — Neuro-Lock Oddball Paradigm Runner
+stimulus_runner.py — Soude Oddball Paradigm Runner
 Drives the image flash sequence and couples it tightly with BrainEngine.
 Sub-team 3 (UX/UI) integrates against this module.
 """

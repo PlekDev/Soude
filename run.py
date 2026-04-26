@@ -1,5 +1,5 @@
 """
-run.py — Neuro-Lock launcher
+run.py — Soude launcher
 Crea QApplication ANTES de importar app.py para evitar el error
 'QWidget: Must construct a QApplication before a QWidget'
 """

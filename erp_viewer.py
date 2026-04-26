@@ -1,5 +1,5 @@
 """
-erp_viewer.py — Neuro-Lock Live ERP Viewer
+erp_viewer.py — Soude Live ERP Viewer
 Standalone PyQt6 widget that plots target vs non-target grand averages in
 real time.  Sub-team 2 uses this during signal validation; Sub-team 4 uses
 it in the demo.  Can be embedded or run standalone.
@@ -268,7 +268,7 @@ def _demo():
     app = QApplication(sys.argv)
     viewer = ERPViewer()
     viewer.resize(700, 340)
-    viewer.setWindowTitle("Neuro-Lock — ERP Monitor (Demo)")
+    viewer.setWindowTitle("Soude — ERP Monitor (Demo)")
 
     n = 200
     t = [i * 4.0 for i in range(n)]

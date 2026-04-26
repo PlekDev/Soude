@@ -1,8 +1,8 @@
-# 🧠 Neuro-Lock — Brainwave Password Manager
+# 🧠 Soude — Brainwave Password Manager
 
 > **Your password is in your head. Literally.**
 
-Neuro-Lock is a **P300 ERP-based password manager** that authenticates users with their own brainwaves using the [g.tec Unicorn Hybrid Black](https://www.unicorn-bi.com/) EEG headset. There is no keyboard, no mouse, no passphrase to type — just a brief brain scan that unlocks your credential vault.
+Soude is a **P300 ERP-based password manager** that authenticates users with their own brainwaves using the [g.tec Unicorn Hybrid Black](https://www.unicorn-bi.com/) EEG headset. There is no keyboard, no mouse, no passphrase to type — just a brief brain scan that unlocks your credential vault.
 
 Built for the **Br41n.IO Hackathon** by team **SOUDE**.
 
@@ -21,7 +21,7 @@ The **P300** is an involuntary electrical brain response that occurs approximate
 1. The user privately selects 3 images from a pool of 20 as their "mental password" during enrollment.
 2. At login, all 20 images flash at 400 ms intervals (the **oddball paradigm**).
 3. Each time a target (password) image appears, the brain produces a characteristic P300 deflection on centroparietal channels (Cz, Pz, Oz).
-4. Neuro-Lock averages 5 repetitions per image, computes the mean P300 amplitude in the 250–500 ms window, and compares target vs. non-target averages.
+4. Soude averages 5 repetitions per image, computes the mean P300 amplitude in the 250–500 ms window, and compares target vs. non-target averages.
 5. If the target P300 exceeds the non-target by ≥ 1.5 µV, the vault unlocks.
 
 ---
@@ -30,7 +30,7 @@ The **P300** is an involuntary electrical brain response that occurs approximate
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        NEURO-LOCK                                   │
+│                           SOUDE                                      │
 │                                                                     │
 │  ┌──────────────┐     ┌──────────────────────────────────────────┐  │
 │  │  Unicorn HB  │────▶│           brain_engine.py                │  │
@@ -106,7 +106,7 @@ Python 3.10+ recommended (uses `list[int]` type hints throughout).
 
 ```bash
 git clone https://github.com/PlekDev/Soude.git
-cd neuro-lock
+cd Soude
 pip install numpy scipy PyQt6
 ```
 
@@ -227,7 +227,7 @@ The interface uses a cyberpunk/neuro aesthetic built entirely with PyQt6. Below 
 ### Window Icon & Title
 
 ```python
-self.setWindowTitle("NEURO-LOCK")
+self.setWindowTitle("SOUDE")
 self.setWindowIcon(QIcon("assets/brain_icon.png"))
 ```
 
@@ -261,7 +261,7 @@ label.setFont(QFont("Orbitron", 28, QFont.Weight.Bold))
 Apply a single stylesheet to `QApplication` so all widgets inherit the theme:
 
 ```python
-NEURO_STYLESHEET = """
+SOUDE_STYLESHEET = """
 QMainWindow, QWidget#centralWidget {
     background-color: #050505;
 }
@@ -317,7 +317,7 @@ QProgressBar::chunk {
 """
 
 app = QApplication(sys.argv)
-app.setStyleSheet(NEURO_STYLESHEET)
+app.setStyleSheet(SOUDE_STYLESHEET)
 ```
 
 ### Glow Effect on Key Widgets
@@ -342,7 +342,7 @@ add_glow(self.scan_button, radius=15)
 Remove the native OS title bar and implement custom dragging:
 
 ```python
-class NeurolockWindow(QMainWindow):
+class SoudeWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
@@ -406,7 +406,7 @@ THEME = {
 ### Asset Folder Structure
 
 ```
-neuro-lock/
+Soude/
 ├── assets/
 │   ├── fonts/
 │   │   ├── Orbitron-Bold.ttf
@@ -544,14 +544,21 @@ logs/20260425_022022/
 
 Built at the **Br41n.IO Hackathon** by team **SOUDE**:
 
-| Role | Sub-team |
-|---|---|
-| Hardware / API integration | Sub-team 1 |
-| Signal processing & math | Sub-team 2 |
-| UX / UI / stimulus design | Sub-team 3 |
-| Integration, logging & demo | Sub-team 4 |
+
+- [Aaron Emmanuel Hernández Rodriguez](https://github.com/AaronHero03) 
+- [Angel Landin Lopez](https://github.com/AngelLandin)
+- [Victor Velázquez](https://github.com/Victor-123321) 
+- [Andrés Guzmán](https://github.com/andyys27) 
+- [Emiliano Montalvo](https://github.com/EmiMon-456) 
+- [Diego Huitron](https://github.com/Huitr0n) 
+- [Osvaldo Franco](https://github.com/Osva-Franco)
+- [Emiliano Galván](https://github.com/Soy3miliano)  
+- [DiegoLizarraga](https://github.com/DiegoLizarraga) 
+- [Kimberly Chihiro Camarillo Paredes]()
 
 ---
+
+
 
 ## License
 

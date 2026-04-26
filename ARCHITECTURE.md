@@ -1,4 +1,4 @@
-# Neuro-Lock — Architecture & Team Playbook
+# Soude — Architecture & Team Playbook
 ## Br41n.IO Hackathon — 36 Hours Remaining
 
 ---
@@ -7,7 +7,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        NEURO-LOCK MVP                               │
+│                           SOUDE MVP                                 │
 │                                                                     │
 │  ┌──────────────┐     ┌──────────────────────────────────────────┐  │
 │  │  Unicorn HB  │────▶│         brain_engine.py                  │  │

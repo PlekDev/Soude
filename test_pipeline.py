@@ -1,5 +1,5 @@
 """
-test_pipeline.py — Neuro-Lock Signal Pipeline Validator
+test_pipeline.py — Soude Signal Pipeline Validator
 Run this WITHOUT a headset to verify the full pipeline end-to-end.
 Prints pass/fail for each stage and ends with an auth decision.
 

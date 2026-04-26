@@ -1,4 +1,4 @@
-# 🧠 NEURO-LOCK — Video Script
+# 🧠 SOUDE — Video Script
 ### Team SOUDE · Br41n.IO Hackathon · Max 5 minutes
 
 ---
@@ -87,9 +87,9 @@
 **[VISUAL]** Cut to: team member putting on the **Unicorn Hybrid Black** EEG headset. Confident, almost casual.
 
 **[NARRATION]**
-> "This is Neuro-Lock. Built in 36 hours. Running on a real 8-channel EEG headset."
+> "This is Soude. Built in 36 hours. Running on a real 8-channel EEG headset."
 
-**[VISUAL]** Screen capture of the app's **Home Screen** — the dark UI, glowing cyan NEURO-LOCK title, signal quality dots turning green one by one.
+**[VISUAL]** Screen capture of the app's **Home Screen** — the dark UI, glowing cyan SOUDE title, signal quality dots turning green one by one.
 
 **[NARRATION]**
 > "The signal quality monitor confirms electrode contact.
@@ -173,7 +173,7 @@
 > And for the **200 million people worldwide** with motor impairments —
 > a password system they can actually use."
 
-**[VISUAL]** Pull back to show the Neuro-Lock UI — it looks small now against this vision.
+**[VISUAL]** Pull back to show the Soude UI — it looks small now against this vision.
 
 **[NARRATION]**
 > "We built a proof of concept in 36 hours.
@@ -186,7 +186,7 @@
 
 ## ▶ SEGMENT 7 — THE CLOSE (4:40 – 5:00)
 
-**[VISUAL]** Slow zoom into the NEURO-LOCK logo on screen, glowing. Then fade to the team — four people, headset on the table between them.
+**[VISUAL]** Slow zoom into the SOUDE logo on screen, glowing. Then fade to the team — four people, headset on the table between them.
 
 **[NARRATION — warm, direct]**
 > "We are team **SOUDE**.
@@ -195,7 +195,7 @@
 
 **[ON SCREEN — final card]**
 ```
-🧠  NEURO-LOCK
+🧠  SOUDE
 Brainwave Authentication
 
 Team SOUDE · Br41n.IO Hackathon

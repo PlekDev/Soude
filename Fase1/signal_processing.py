@@ -1,5 +1,5 @@
 """
-signal_processing.py — Neuro-Lock Signal Processing Pipeline
+signal_processing.py — Soude Signal Processing Pipeline
 Real-time filtering, epoch extraction, P300 detection, and authentication.
 Sub-team 2 (Signal/Math) owns this file.
 """

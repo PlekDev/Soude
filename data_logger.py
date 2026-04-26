@@ -1,5 +1,5 @@
 """
-data_logger.py — Neuro-Lock Session Logger
+data_logger.py — Soude Session Logger
 Records raw epochs, markers, and auth results for debugging and demo replay.
 Sub-team 4 (Integration/Demo) owns this file.
 """
@@ -126,7 +126,7 @@ class SessionLogger:
         path = self._dir / "summary.txt"
         lines = [
             "=" * 60,
-            f"NEURO-LOCK SESSION — {self._dir.name}",
+            f"SOUDE SESSION — {self._dir.name}",
             "=" * 60,
             f"Total stimuli:   {len(self._marker_rows)}",
             f"Epochs saved:    {len(self._epochs)}",

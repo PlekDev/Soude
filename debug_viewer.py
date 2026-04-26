@@ -1,5 +1,5 @@
 """
-debug_viewer.py — Neuro-Lock Session Replay Debugger
+debug_viewer.py — Soude Session Replay Debugger
 Loads any saved log session and shows:
   • Scrollable stimulus timeline with ISI analysis
   • Per-epoch inspector (click any event to inspect its 800 ms epoch)
@@ -893,7 +893,7 @@ class DebugViewer(QMainWindow):
 
     def __init__(self, initial_session: Optional[Path] = None):
         super().__init__()
-        self.setWindowTitle("🧠  Neuro-Lock — Session Debug Viewer")
+        self.setWindowTitle("🧠  Soude — Session Debug Viewer")
         self.setMinimumSize(1280, 820)
         self.setStyleSheet(f"background:{C.BG_DEEP};")
 
@@ -916,7 +916,7 @@ class DebugViewer(QMainWindow):
         hdr_layout = QHBoxLayout(header)
         hdr_layout.setContentsMargins(14, 4, 14, 4)
         hdr_layout.setSpacing(12)
-        hdr_layout.addWidget(mono_label("🧠  NEURO-LOCK  DEBUG  VIEWER", 13, C.ACCENT))
+        hdr_layout.addWidget(mono_label("🧠  SOUDE  DEBUG  VIEWER", 13, C.ACCENT))
         hdr_layout.addSpacing(16)
         hdr_layout.addWidget(mono_label("Session:", 10, C.TEXT_LO))
 
@@ -1140,7 +1140,7 @@ def main() -> None:
             initial = LOGS_DIR / sys.argv[1]
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Neuro-Lock Debug Viewer")
+    app.setApplicationName("Soude Debug Viewer")
     win = DebugViewer(initial_session=initial)
     win.show()
     sys.exit(app.exec())
@@ -1150,7 +1150,7 @@ if __name__ == "__main__":
     main() LOGS_DIR / sys.argv[1]
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Neuro-Lock Debug Viewer")
+    app.setApplicationName("Soude Debug Viewer")
     win = DebugViewer(initial_session=initial)
     win.show()
     sys.exit(app.exec())
@@ -1161,7 +1161,7 @@ if __name__ == "__main__":
  LOGS_DIR / sys.argv[1]
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Neuro-Lock Debug Viewer")
+    app.setApplicationName("Soude Debug Viewer")
     win = DebugViewer(initial_session=initial)
     win.show()
     sys.exit(app.exec())

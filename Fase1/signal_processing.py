@@ -40,7 +40,7 @@ P300_OFFSET    = int(P300_OFFSET_S * SAMPLE_RATE)
 AUTH_THRESHOLD_UV = 1.5    # µV — a genuine P300 mean should comfortably exceed this.
 
 # Minimum required epochs per class for reliable averaging
-MIN_EPOCHS = 2             # Lowered to tolerate aggressive artifact rejection
+MIN_EPOCHS = 5             # Need at least 5 clean epochs per class for a reliable average
 
 @dataclass
 class AuthResult:
@@ -119,10 +119,12 @@ def baseline_correct(epoch: np.ndarray, baseline_samples: int = BASELINE_SAMPLES
 
 # ── Artifact Rejection ─────────────────────────────────────────────────────────
 
-def is_artifact(epoch: np.ndarray, threshold_uv: float = 800.0) -> bool:
+def is_artifact(epoch: np.ndarray, threshold_uv: float = 100.0) -> bool:
     """
     Reject epoch if any channel exceeds threshold_uv peak-to-peak.
-    Raised to 500 µV for real-hardware tolerance (muscle/movement artifacts).
+    After bandpass filtering (0.5–30 Hz), genuine EEG should be 10–100 µV p-p.
+    Artifacts from poor contact, cable movement, or mains interference appear
+    as bursts well above 100 µV and must be rejected.
     Typical blink artifact: >150 µV on frontal channels.
     """
     pp = epoch.max(axis=0) - epoch.min(axis=0)

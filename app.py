@@ -25,12 +25,12 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QFont, QFontDatabase, QPixmap, QPainter, QColor, QPainterPath,
-    QLinearGradient, QRadialGradient, QPen, QBrush, QKeySequence,
+    QLinearGradient, QRadialGradient, QPen, QBrush, QKeySequence, QIcon,
 )
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QStackedWidget, QFrame, QGraphicsDropShadowEffect,
-    QGridLayout, QProgressBar, QMessageBox, QDialog, QSizePolicy,
+    QGraphicsOpacityEffect, QGridLayout, QProgressBar, QMessageBox, QDialog, QSizePolicy,
 )
 
 from brain_engine import BrainEngine, MockUnicorn, SAMPLE_RATE, N_CHANNELS
@@ -38,6 +38,16 @@ from Fase1.signal_processing import AuthenticationPipeline, AuthResult, EPOCH_DU
 from Fase1.stimulus_runner import StimulusRunner, ParadigmConfig
 from data_logger import SessionLogger
 from erp_viewer import ERPViewer
+
+import faulthandler
+faulthandler.enable()
+
+import traceback
+original_excepthook = sys.excepthook
+def excepthook(type, value, tb):
+    traceback.print_exception(type, value, tb)
+    original_excepthook(type, value, tb)
+sys.excepthook = excepthook
 
 logger = logging.getLogger(__name__)
 
@@ -100,15 +110,83 @@ STIMULUS_CATALOG = [
 
 # ── Color Palette ──────────────────────────────────────────────────────────────
 class Colors:
-    BG_DEEP    = "#060a10"
-    BG_PANEL   = "#0d1520"
-    ACCENT     = "#00e5ff"
-    ACCENT2    = "#7c4dff"
-    SUCCESS    = "#00e676"
-    DANGER     = "#ff1744"
-    TEXT_HI    = "#e8f4fd"
-    TEXT_LO    = "#4a6478"
-    BORDER     = "#1a2e42"
+    BG_DEEP    = "#080808"
+    BG_PANEL   = "#111111"
+    ACCENT     = "#b4ff00"
+    ACCENT2    = "#5a5a5a"
+    SUCCESS    = "#7ecb00"
+    DANGER     = "#cc2222"
+    TEXT_HI    = "#f0f0f0"
+    TEXT_LO    = "#606060"
+    BORDER     = "#242424"
+
+
+NEURO_STYLESHEET = f"""
+QMainWindow {{
+    background-color: {Colors.BG_DEEP};
+}}
+
+QScrollBar:vertical {{
+    background: {Colors.BG_PANEL};
+    width: 6px;
+    border: none;
+    margin: 0;
+}}
+QScrollBar::handle:vertical {{
+    background: {Colors.BORDER};
+    border-radius: 3px;
+    min-height: 20px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {Colors.TEXT_LO};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0;
+}}
+
+QScrollBar:horizontal {{
+    background: {Colors.BG_PANEL};
+    height: 6px;
+    border: none;
+    margin: 0;
+}}
+QScrollBar::handle:horizontal {{
+    background: {Colors.BORDER};
+    border-radius: 3px;
+    min-width: 20px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background: {Colors.TEXT_LO};
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+    width: 0;
+}}
+
+QMessageBox {{
+    background-color: {Colors.BG_PANEL};
+}}
+QMessageBox QLabel {{
+    color: {Colors.TEXT_HI};
+    font-size: 13px;
+}}
+
+QToolTip {{
+    background-color: {Colors.BG_PANEL};
+    color: {Colors.TEXT_HI};
+    border: 1px solid {Colors.BORDER};
+    font-size: 11px;
+    padding: 4px 8px;
+}}
+"""
+
+
+def add_glow(widget, color: str = Colors.ACCENT, radius: int = 20) -> None:
+    """Apply a drop-shadow glow effect to any widget."""
+    effect = QGraphicsDropShadowEffect(widget)
+    effect.setBlurRadius(radius)
+    effect.setColor(QColor(color))
+    effect.setOffset(0, 0)
+    widget.setGraphicsEffect(effect)
 
 
 # ── Worker Thread for Paradigm ─────────────────────────────────────────────────
@@ -175,33 +253,33 @@ class GlowButton(QPushButton):
     def __init__(self, text: str, accent: str = Colors.ACCENT, parent=None):
         super().__init__(text, parent)
         self._accent = accent
-        self.setFixedHeight(52)
+        self.setFixedHeight(46)
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(24)
+        shadow.setBlurRadius(12)
         shadow.setColor(QColor(accent))
         shadow.setOffset(0, 0)
         self.setGraphicsEffect(shadow)
         self.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
-                border: 1.5px solid {accent};
-                border-radius: 8px;
+                border: 1px solid {accent};
+                border-radius: 3px;
                 color: {accent};
                 font-family: 'Share Tech Mono', 'Courier New', monospace;
-                font-size: 14px;
+                font-size: 11px;
                 letter-spacing: 3px;
                 padding: 0 28px;
             }}
             QPushButton:hover {{
-                background: {accent}22;
+                background: {accent}16;
                 color: {Colors.TEXT_HI};
             }}
             QPushButton:pressed {{
-                background: {accent}44;
+                background: {accent}28;
             }}
             QPushButton:disabled {{
-                border-color: {Colors.TEXT_LO};
-                color: {Colors.TEXT_LO};
+                border-color: {Colors.BORDER};
+                color: {Colors.BORDER};
             }}
         """)
 
@@ -225,19 +303,21 @@ class ScanlineWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
 
-        # Deep background
+        # Near-black background
         painter.fillRect(0, 0, w, h, QColor(Colors.BG_DEEP))
 
-        # Subtle scanlines
-        pen = QPen(QColor(255, 255, 255, 6))
+        # Subtle dot grid
+        pen = QPen(QColor(255, 255, 255, 10))
         pen.setWidth(1)
         painter.setPen(pen)
-        for y in range(0, h, 4):
-            painter.drawLine(0, y, w, y)
+        spacing = 40
+        for x in range(0, w + spacing, spacing):
+            for y in range(0, h + spacing, spacing):
+                painter.drawPoint(x, y)
 
-        # Radial glow
-        grad = QRadialGradient(w * 0.5, h * 0.3, h * 0.6)
-        grad.setColorAt(0, QColor(0, 80, 120, 40))
+        # Soft lime-green radial glow at top-center
+        grad = QRadialGradient(w * 0.5, 0, h * 0.55)
+        grad.setColorAt(0, QColor(180, 255, 0, 20))
         grad.setColorAt(1, QColor(0, 0, 0, 0))
         painter.fillRect(0, 0, w, h, grad)
         painter.end()
@@ -265,8 +345,8 @@ class LiveSignalVisualizerWidget(QWidget):
 
     CH_NAMES  = ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"]
     CH_COLORS = [
-        "#00e5ff", "#7c4dff", "#00e676", "#ff5252",
-        "#ffab40", "#ea80fc", "#40c4ff", "#b2ff59",
+        "#a8e600", "#d4f566", "#f0f0f0", "#8a8a8a",
+        "#7ecb00", "#c0c0c0", "#5a9900", "#e0e0e0",
     ]
     WINDOW_S  = 4
     N_SAMPLES = SAMPLE_RATE * WINDOW_S   # 1 000 samples @ 250 Hz
@@ -361,7 +441,7 @@ class LiveSignalVisualizerWidget(QWidget):
             painter.drawText(2, int(y_center) + 4, self.CH_NAMES[ch])
 
             # Baseline rule
-            base_pen = QPen(QColor(30, 46, 66, 100))
+            base_pen = QPen(QColor(40, 40, 40, 100))
             base_pen.setWidth(1)
             painter.setPen(base_pen)
             painter.drawLine(ml, int(y_center), ml + plot_w, int(y_center))
@@ -416,7 +496,7 @@ class SignalMonitorScreen(QWidget):
 
         # ── Header ────────────────────────────────────────────────────────────
         header = QHBoxLayout()
-        title = QLabel("⚡  LIVE EEG SIGNAL MONITOR", self)
+        title = QLabel("LIVE EEG SIGNAL MONITOR", self)
         title.setStyleSheet(
             f"color: {Colors.ACCENT}; font-size: 16px; font-weight: 700; "
             f"font-family: 'Share Tech Mono', monospace; letter-spacing: 4px;"
@@ -490,8 +570,16 @@ class StimulusScreen(QWidget):
         self._progress.setRange(0, 100)
         self._progress.setTextVisible(False)
         self._progress.setStyleSheet(f"""
-            QProgressBar {{ background: {Colors.BG_PANEL}; border: none; }}
-            QProgressBar::chunk {{ background: {Colors.ACCENT}; }}
+            QProgressBar {{
+                background: {Colors.BG_PANEL};
+                border: 1px solid rgba(180, 255, 0, 0.2);
+                border-radius: 3px;
+            }}
+            QProgressBar::chunk {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #4dff00, stop:1 {Colors.ACCENT});
+                border-radius: 3px;
+            }}
         """)
         self._layout.addWidget(self._progress)
 
@@ -603,7 +691,10 @@ class ResultScreen(QWidget):
 
         self._icon = QLabel("", self)
         self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._icon.setStyleSheet("font-size: 96px;")
+        self._icon.setStyleSheet(
+            f"font-size: 64px; font-weight: 700; "
+            f"font-family: 'Segoe UI Symbol', 'Segoe UI', sans-serif;"
+        )
         left.addWidget(self._icon)
 
         self._title = QLabel("", self)
@@ -628,9 +719,9 @@ class ResultScreen(QWidget):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
-        self._btn_retry      = GlowButton("⟳  RETRY", Colors.ACCENT)
-        self._btn_back       = GlowButton("←  BACK", Colors.TEXT_LO)
-        self._btn_open_vault = GlowButton("▶  OPEN VAULT", Colors.SUCCESS)
+        self._btn_retry      = GlowButton("RETRY", Colors.ACCENT)
+        self._btn_back       = GlowButton("BACK", Colors.TEXT_LO)
+        self._btn_open_vault = GlowButton("OPEN VAULT", Colors.SUCCESS)
         self._btn_retry.clicked.connect(self._on_retry)
         self._btn_back.clicked.connect(self._on_back)
         self._btn_open_vault.clicked.connect(self._on_open_vault)
@@ -670,7 +761,11 @@ class ResultScreen(QWidget):
     def show_result(self, result: AuthResult, pipeline=None):
         """Populate the verdict panel and kick the ERP display."""
         if result.granted:
-            self._icon.setText("🔓")
+            self._icon.setText("✓")
+            self._icon.setStyleSheet(
+                f"font-size: 64px; font-weight: 700; color: {Colors.SUCCESS}; "
+                f"font-family: 'Segoe UI Symbol', 'Segoe UI', sans-serif;"
+            )
             self._title.setText("ACCESS GRANTED")
             self._title.setStyleSheet(
                 f"font-size: 32px; font-weight: 700; color: {Colors.SUCCESS}; "
@@ -679,7 +774,11 @@ class ResultScreen(QWidget):
             self._btn_open_vault.setVisible(True)
             self._btn_retry.setVisible(False)
         else:
-            self._icon.setText("🔒")
+            self._icon.setText("✗")
+            self._icon.setStyleSheet(
+                f"font-size: 64px; font-weight: 700; color: {Colors.DANGER}; "
+                f"font-family: 'Segoe UI Symbol', 'Segoe UI', sans-serif;"
+            )
             self._title.setText("ACCESS DENIED")
             self._title.setStyleSheet(
                 f"font-size: 32px; font-weight: 700; color: {Colors.DANGER}; "
@@ -701,6 +800,14 @@ class ResultScreen(QWidget):
             self._erp_viewer.set_pipeline(pipeline)
             self._erp_viewer.start_live(interval_ms=400)
 
+def load_custom_fonts():
+    fonts_dir = Path("assets/fonts")
+    for font_file in fonts_dir.glob("*.ttf"):
+        QFontDatabase.addApplicationFont(str(font_file))
+
+# Uso
+label = QLabel("NEURO-LOCK")
+label.setFont(QFont("Orbitron", 28, QFont.Weight.Bold))
 
 # ── Vault Screen ───────────────────────────────────────────────────────────────
 
@@ -714,14 +821,14 @@ class VaultScreen(QWidget):
 
     # ── Example password vault entries ─────────────────────────────────────────
     VAULT_ENTRIES = [
-        ("🐙  GitHub",          "Gr4p3_P1ck3r!2024"),
-        ("📧  Gmail",           "S0lar_Fl4re#99"),
-        ("💼  LinkedIn",        "ProN3tw0rk@2024"),
-        ("☁️  AWS Console",     "Cl0ud9!AWS_Root"),
-        ("🏦  Online Banking",  "S3cur3B4nk#Vault"),
-        ("🎬  Netflix",         "B!ng3W4tch_2024"),
-        ("📡  Wi-Fi Router",    "H0m3N3t_Adm1n!"),
-        ("₿  Crypto Wallet",   "B1tc0in$H0DL999"),
+        ("GitHub",         "Gr4p3_P1ck3r!2024"),
+        ("Gmail",          "S0lar_Fl4re#99"),
+        ("LinkedIn",       "ProN3tw0rk@2024"),
+        ("AWS Console",    "Cl0ud9!AWS_Root"),
+        ("Online Banking", "S3cur3B4nk#Vault"),
+        ("Netflix",        "B!ng3W4tch_2024"),
+        ("Wi-Fi Router",   "H0m3N3t_Adm1n!"),
+        ("Crypto Wallet",  "B1tc0in$H0DL999"),
     ]
 
     def __init__(self, parent=None):
@@ -734,9 +841,11 @@ class VaultScreen(QWidget):
 
         # ── Header ─────────────────────────────────────────────────────────────
         header_row = QHBoxLayout()
-        icon_lbl = QLabel("🔓", self)
-        icon_lbl.setStyleSheet("font-size: 38px;")
-        header_row.addWidget(icon_lbl)
+        accent_bar = QFrame(self)
+        accent_bar.setFixedSize(4, 36)
+        accent_bar.setStyleSheet(f"background: {Colors.SUCCESS}; border-radius: 2px;")
+        header_row.addWidget(accent_bar)
+        header_row.addSpacing(12)
 
         title_lbl = QLabel("VAULT UNLOCKED", self)
         title_lbl.setStyleSheet(
@@ -776,7 +885,7 @@ class VaultScreen(QWidget):
 
         # ── Footer ─────────────────────────────────────────────────────────────
         footer_row = QHBoxLayout()
-        hint = QLabel("Click 👁 to reveal  •  Vault auto-locks on close", self)
+        hint = QLabel("Click SHOW to reveal  •  Vault auto-locks on close", self)
         hint.setStyleSheet(
             f"color: {Colors.TEXT_LO}; font-size: 11px; "
             f"font-family: 'Share Tech Mono', monospace;"
@@ -784,7 +893,7 @@ class VaultScreen(QWidget):
         footer_row.addWidget(hint)
         footer_row.addStretch()
 
-        btn_lock = GlowButton("🔒  LOCK VAULT", Colors.DANGER)
+        btn_lock = GlowButton("LOCK VAULT", Colors.DANGER)
         btn_lock.setFixedWidth(220)
         btn_lock.clicked.connect(self.sig_lock)
         footer_row.addWidget(btn_lock)
@@ -818,18 +927,20 @@ class VaultScreen(QWidget):
         )
         pw_row.addWidget(pw_lbl, stretch=1)
 
-        eye_btn = QPushButton("👁", card)
-        eye_btn.setFixedSize(30, 30)
+        eye_btn = QPushButton("SHOW", card)
+        eye_btn.setFixedSize(48, 26)
         eye_btn.setStyleSheet(
             f"QPushButton {{ background: transparent; border: 1px solid {Colors.BORDER}; "
-            f"border-radius: 4px; color: {Colors.TEXT_LO}; font-size: 13px; }}"
+            f"border-radius: 3px; color: {Colors.TEXT_LO}; font-size: 9px; "
+            f"font-family: 'Share Tech Mono', monospace; letter-spacing: 1px; }}"
             f"QPushButton:hover {{ border-color: {Colors.ACCENT}; color: {Colors.ACCENT}; }}"
         )
         # Closure-safe toggle
         revealed = [False]
-        def _toggle(_, lbl=pw_lbl, pw=password, state=revealed):
+        def _toggle(_, lbl=pw_lbl, pw=password, state=revealed, btn=eye_btn):
             state[0] = not state[0]
             lbl.setText(pw if state[0] else "••••••••••••••••")
+            btn.setText("HIDE" if state[0] else "SHOW")
         eye_btn.clicked.connect(_toggle)
         pw_row.addWidget(eye_btn)
 
@@ -895,7 +1006,7 @@ class EnrollmentScreen(QWidget):
         layout.addWidget(NeuralDivider())
 
         row = QHBoxLayout()
-        self._btn_confirm = GlowButton("✓  CONFIRM PASSWORD", Colors.SUCCESS)
+        self._btn_confirm = GlowButton("CONFIRM SELECTION", Colors.SUCCESS)
         self._btn_confirm.setEnabled(False)
         self._btn_confirm.clicked.connect(self._confirm)
         row.addStretch()
@@ -973,16 +1084,40 @@ class HomeScreen(QWidget):
         layout.setSpacing(16)
         layout.setContentsMargins(80, 60, 80, 60)
 
-        logo = QLabel("🧠", self)
+        logo = QLabel(self)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setStyleSheet("font-size: 72px;")
+        _logo_path = Path(__file__).parent / "assets" / "logo.png"
+        if _logo_path.exists():
+            _px = QPixmap(str(_logo_path)).scaled(
+                120, 120,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            logo.setPixmap(_px)
+        else:
+            logo.setText("NL")
+            logo.setStyleSheet(
+                f"color: {Colors.ACCENT}; font-size: 52px; font-weight: 800; "
+                f"font-family: 'Exo 2', 'Segoe UI', sans-serif; letter-spacing: 4px;"
+            )
         layout.addWidget(logo)
+
+        self._logo_opacity = QGraphicsOpacityEffect(logo)
+        logo.setGraphicsEffect(self._logo_opacity)
+        self._pulse_anim = QPropertyAnimation(self._logo_opacity, b"opacity", self)
+        self._pulse_anim.setDuration(3200)
+        self._pulse_anim.setStartValue(0.55)
+        self._pulse_anim.setKeyValueAt(0.5, 1.0)
+        self._pulse_anim.setEndValue(0.55)
+        self._pulse_anim.setLoopCount(-1)
+        self._pulse_anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._pulse_anim.start()
 
         title = QLabel("NEURO-LOCK", self)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
             f"color: {Colors.ACCENT}; font-size: 48px; font-weight: 800; "
-            f"font-family: 'Exo 2', 'Segoe UI', sans-serif; letter-spacing: 8px;"
+            f"font-family: 'Orbitron', 'Exo 2', 'Segoe UI', sans-serif; letter-spacing: 8px;"
         )
         shadow = QGraphicsDropShadowEffect(title)
         shadow.setBlurRadius(32)
@@ -1052,18 +1187,18 @@ class HomeScreen(QWidget):
 
         layout.addSpacing(8)
 
-        self._btn_auth = GlowButton("▶  BEGIN NEURAL SCAN", Colors.ACCENT)
+        self._btn_auth = GlowButton("BEGIN NEURAL SCAN", Colors.ACCENT)
         self._btn_auth.setFixedWidth(360)
         self._btn_auth.clicked.connect(self.sig_start_auth)
         self._btn_auth.setEnabled(False)
         layout.addWidget(self._btn_auth, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self._btn_enroll = GlowButton("⚙  SET PASSWORD IMAGES", Colors.ACCENT2)
+        self._btn_enroll = GlowButton("SET PASSWORD IMAGES", Colors.ACCENT2)
         self._btn_enroll.setFixedWidth(360)
         self._btn_enroll.clicked.connect(self.sig_enroll)
         layout.addWidget(self._btn_enroll, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self._btn_monitor = GlowButton("📊  SIGNAL MONITOR", Colors.TEXT_LO)
+        self._btn_monitor = GlowButton("SIGNAL MONITOR", Colors.TEXT_LO)
         self._btn_monitor.setFixedWidth(360)
         self._btn_monitor.clicked.connect(self.sig_monitor)
         layout.addWidget(self._btn_monitor, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -1108,15 +1243,115 @@ class HomeScreen(QWidget):
             )
 
 
+# ── Custom Title Bar ─────────────────────────────────────────────────────────────────────────
+
+class TitleBar(QWidget):
+    """Frameless window title bar: logo, app name, minimize / maximize / close."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._win      = parent
+        self._drag_pos = None
+        self.setFixedHeight(34)
+        self.setStyleSheet(
+            f"background: {Colors.BG_PANEL}; "
+            f"border-bottom: 1px solid {Colors.BORDER};"
+        )
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 0, 6, 0)
+        lay.setSpacing(8)
+
+        _icon_path = Path(__file__).parent / "assets" / "logo.png"
+        if _icon_path.exists():
+            ico = QLabel(self)
+            ico.setPixmap(
+                QPixmap(str(_icon_path)).scaled(
+                    18, 18,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+            ico.setStyleSheet("background: transparent; border: none;")
+            lay.addWidget(ico)
+
+        name = QLabel("NEURO-LOCK", self)
+        name.setStyleSheet(
+            f"color: {Colors.TEXT_LO}; font-size: 10px; letter-spacing: 4px; "
+            f"font-family: 'Share Tech Mono', monospace; "
+            f"background: transparent; border: none;"
+        )
+        lay.addWidget(name)
+        lay.addStretch()
+
+        _btn = (
+            f"QPushButton {{ background: transparent; border: none; "
+            f"color: {Colors.TEXT_LO}; font-size: 14px; "
+            f"min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px; }}"
+            f"QPushButton:hover {{ color: {Colors.TEXT_HI}; "
+            f"background: rgba(255,255,255,0.06); }}"
+        )
+        _close = (
+            f"QPushButton {{ background: transparent; border: none; "
+            f"color: {Colors.TEXT_LO}; font-size: 14px; "
+            f"min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px; }}"
+            f"QPushButton:hover {{ color: #ffffff; background: {Colors.DANGER}; }}"
+        )
+
+        btn_min = QPushButton("−", self)   # − minus
+        btn_min.setStyleSheet(_btn)
+        btn_min.clicked.connect(parent.showMinimized)
+        lay.addWidget(btn_min)
+
+        self._btn_max = QPushButton("□", self)  # □ square
+        self._btn_max.setStyleSheet(_btn)
+        self._btn_max.clicked.connect(self._toggle_max)
+        lay.addWidget(self._btn_max)
+
+        btn_close = QPushButton("✕", self)  # x close
+        btn_close.setStyleSheet(_close)
+        btn_close.clicked.connect(parent.close)
+        lay.addWidget(btn_close)
+
+    def _toggle_max(self):
+        if self._win.isMaximized():
+            self._win.showNormal()
+            self._btn_max.setText("□")
+        else:
+            self._win.showMaximized()
+            self._btn_max.setText("▣")  # filled square = restore
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos and not self._win.isMaximized():
+            delta = event.globalPosition().toPoint() - self._drag_pos
+            self._win.move(self._win.pos() + delta)
+            self._drag_pos = event.globalPosition().toPoint()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._toggle_max()
+
+
 # ── Main Window ──────────────────────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setWindowTitle("Neuro-Lock")
         self.setMinimumSize(1024, 768)
         self.setStyleSheet(f"background: {Colors.BG_DEEP};")
+        _icon_path = Path(__file__).parent / "assets" / "logo.png"
+        if _icon_path.exists():
+            self.setWindowIcon(QIcon(str(_icon_path)))
 
         if UNICORN_SERIAL:
             self._engine = BrainEngine(serial=UNICORN_SERIAL)
@@ -1127,7 +1362,17 @@ class MainWindow(QMainWindow):
         self._password_ids = list(DEFAULT_PASSWORD_IDS)
 
         self._stack = QStackedWidget(self)
-        self.setCentralWidget(self._stack)
+
+        # Wrap stack with custom title bar
+        _container = QWidget(self)
+        _container.setStyleSheet(f"background: {Colors.BG_DEEP};")
+        _vlay = QVBoxLayout(_container)
+        _vlay.setContentsMargins(0, 0, 0, 0)
+        _vlay.setSpacing(0)
+        self._title_bar = TitleBar(self)
+        _vlay.addWidget(self._title_bar)
+        _vlay.addWidget(self._stack, stretch=1)
+        self.setCentralWidget(_container)
 
         self._home_screen          = HomeScreen(self)
         self._stimulus_screen      = StimulusScreen(self)
@@ -1264,6 +1509,8 @@ class MainWindow(QMainWindow):
 # ── Entry Point ──────────────────────────────────────────────────────────────────────────────
 
 def main():
+    import os
+    os.environ["QT_LOGGING_RULES"] = "*.debug=true"
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
@@ -1282,11 +1529,15 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("Neuro-Lock")
+    _app_icon = Path(__file__).parent / "assets" / "logo.png"
+    if _app_icon.exists():
+        app.setWindowIcon(QIcon(str(_app_icon)))
     try:
         for font_path in (Path(__file__).parent / "assets" / "fonts").glob("*.ttf"):
             QFontDatabase.addApplicationFont(str(font_path))
     except Exception:
         pass
+    app.setStyleSheet(NEURO_STYLESHEET)
     win = MainWindow()
     win.show()
     sys.exit(app.exec())

@@ -17,14 +17,14 @@ from PyQt6.QtWidgets import (
 )
 
 # ── Colors ─────────────────────────────────────────────────────────────────────
-C_BG        = QColor("#060a10")
-C_GRID      = QColor("#1a2e42")
-C_TARGET    = QColor("#00e676")   # green
-C_NONTARGET = QColor("#ff5252")   # red
-C_SHADE     = QColor(0, 230, 118, 30)
-C_P300_ZONE = QColor(0, 229, 255, 18)
-C_TEXT      = QColor("#4a6478")
-C_AXIS      = QColor("#1a2e42")
+C_BG        = QColor("#080808")
+C_GRID      = QColor("#242424")
+C_TARGET    = QColor("#b4ff00")   # lime green
+C_NONTARGET = QColor("#cc4444")   # muted red
+C_SHADE     = QColor(180, 255, 0, 28)
+C_P300_ZONE = QColor(180, 255, 0, 14)
+C_TEXT      = QColor("#606060")
+C_AXIS      = QColor("#242424")
 
 
 class ERPCanvas(QWidget):
@@ -96,7 +96,7 @@ class ERPCanvas(QWidget):
             x1, _ = to_px(self._p300_onset, 0)
             x2, _ = to_px(self._p300_offset, 0)
             painter.fillRect(int(x1), mt, int(x2 - x1), plot_h, C_P300_ZONE)
-            pen = QPen(QColor(0, 229, 255, 60))
+            pen = QPen(QColor(180, 255, 0, 50))
             pen.setStyle(Qt.PenStyle.DashLine)
             pen.setWidth(1)
             painter.setPen(pen)
@@ -112,7 +112,7 @@ class ERPCanvas(QWidget):
             painter.drawLine(ml, int(y), ml + plot_w, int(y))
 
         # Zero line
-        zero_pen = QPen(QColor("#2a4060"))
+        zero_pen = QPen(QColor("#2a2a2a"))
         zero_pen.setWidth(1)
         painter.setPen(zero_pen)
         _, y0 = to_px(0, 0.0)
@@ -143,7 +143,7 @@ class ERPCanvas(QWidget):
         if self._t_ms and self._target and self._target_sem:
             from PyQt6.QtGui import QPolygonF
             from PyQt6.QtCore import QPointF
-            ribbon_color = QColor(0, 230, 118, 40)
+            ribbon_color = QColor(180, 255, 0, 30)
             poly = []
             for i, (t, a, s) in enumerate(zip(self._t_ms, self._target, self._target_sem)):
                 x, y = to_px(t, a + s)
@@ -208,7 +208,7 @@ class ERPViewer(QWidget):
     def __init__(self, pipeline=None, parent=None):
         super().__init__(parent)
         self._pipeline = pipeline
-        self.setStyleSheet("background: #060a10;")
+        self.setStyleSheet("background: #080808;")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -216,7 +216,7 @@ class ERPViewer(QWidget):
         header = QHBoxLayout()
         title = QLabel("ERP MONITOR — Pz / Cz / Oz Average")
         title.setStyleSheet(
-            "color: #00e5ff; font-size: 12px; letter-spacing: 3px; "
+            "color: #b4ff00; font-size: 12px; letter-spacing: 3px; "
             "font-family: 'Share Tech Mono', monospace;"
         )
         header.addWidget(title)
@@ -224,7 +224,7 @@ class ERPViewer(QWidget):
 
         self._n_label = QLabel("T: 0 | NT: 0")
         self._n_label.setStyleSheet(
-            "color: #4a6478; font-size: 11px; font-family: 'Share Tech Mono', monospace;"
+            "color: #606060; font-size: 11px; font-family: 'Share Tech Mono', monospace;"
         )
         header.addWidget(self._n_label)
         layout.addLayout(header)

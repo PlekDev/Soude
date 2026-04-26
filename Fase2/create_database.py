@@ -94,7 +94,7 @@ def collect_data():
     if dataset:
         df = pd.DataFrame(dataset, columns=['Variance_C3', 'Variance_C4', 'Class'])
         os.makedirs('Fase2', exist_ok=True)
-        df.to_csv('Fase2/dataset_phase2.csv', index=False)
+        df.to_csv('dataset_phase2.csv', index=False)
         print(f"\n🏁 DONE! {len(df)} samples saved to 'Fase2/dataset_phase2.csv'")
         print("\nDistribución de clases:")
         print(df['Class'].value_counts().to_string())

@@ -148,6 +148,9 @@ class ParadigmWorker(QObject):
         import time
         time.sleep(EPOCH_DURATION_S + 0.1)
         result = self._pipeline.evaluate()
+        # Re-stamp is_target on all markers now that the full sequence is done.
+        # (set_targets was called at __init__ before any markers existed.)
+        self._engine.set_targets(self._password_ids)
         # Write session log
         try:
             session = SessionLogger()
@@ -1292,37 +1295,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-# ── Entry Point ───────────────────────────────────────────────────────────────
-
-def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-    )
-
-    # ── Windows: set timer resolution to 1 ms ────────────────────────────────
-    # Default Windows timer granularity is 15.6 ms, which causes large scheduling
-    # jitter in the stimulus timing thread.  timeBeginPeriod(1) requests 1 ms
-    # resolution for the lifetime of this process.
-    try:
-        import ctypes
-        ctypes.windll.winmm.timeBeginPeriod(1)
-        logger.info("Windows timer resolution set to 1 ms.")
-    except Exception:
-        pass   # Non-Windows or call not available — acceptable
-
-    app = QApplication(sys.argv)
-    app.setApplicationName("Neuro-Lock")
-    try:
-        for font_path in (Path(__file__).parent / "assets" / "fonts").glob("*.ttf"):
-            QFontDatabase.addApplicationFont(str(font_path))
-    except Exception:
-        pass
-    win = MainWindow()
-    win.show()
-    sys.exit(app.exec())
-
-
-if __name__ == "__main__":
-    main()

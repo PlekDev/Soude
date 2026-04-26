@@ -216,6 +216,95 @@ class MockUnicorn(UnicornInterface):
         return out
 
 
+# ── LSL Network Receiver ──────────────────────────────────────────────────────
+class LSLUnicorn(UnicornInterface):
+    """
+    Receives EEG from an LSL stream broadcast by emisor.py (or by another
+    BrainEngine instance running on the LAN).  Implements the same
+    UnicornInterface contract as RealUnicorn so the rest of the application
+    — stimulus display, authentication pipeline, session logging — works
+    completely unchanged on the receiving machine.
+
+    Usage:
+        Set  UNICORN_SERIAL=LSL  in your .env file on the receiver machine.
+        BrainEngine will automatically pick this class.
+
+    Network setup:
+        Sender  : run the main app (or emisor.py) on the machine that has
+                  the Unicorn dongle/licence.  The LSL stream "Unicorn_EEG"
+                  is broadcast automatically.
+        Receiver: set UNICORN_SERIAL=LSL and run the main app normally.
+                  Both machines must be on the same WiFi / LAN segment.
+    """
+
+    LSL_STREAM_NAME  = "Unicorn_EEG"
+    RESOLVE_TIMEOUT  = 15.0    # seconds to scan the network for the stream
+    PULL_TIMEOUT     = 0.05    # seconds per pull_chunk call inside get_data()
+    GET_DATA_TIMEOUT = 5.0     # hard deadline per get_data() call
+
+    def __init__(self):
+        self._inlet = None
+        # Internal FIFO: accumulates samples that arrived between get_data() calls
+        self._pending: list[list[float]] = []
+        self._lock = threading.Lock()
+
+    def open(self) -> None:
+        from pylsl import resolve_byprop, StreamInlet
+        logger.info(
+            "LSLUnicorn: searching for '%s' on the network (timeout %.0f s)…",
+            self.LSL_STREAM_NAME, self.RESOLVE_TIMEOUT,
+        )
+        streams = resolve_byprop(
+            "name", self.LSL_STREAM_NAME, timeout=self.RESOLVE_TIMEOUT
+        )
+        if not streams:
+            raise RuntimeError(
+                f"No LSL stream named '{self.LSL_STREAM_NAME}' found on the network.\n"
+                "Make sure emisor.py (or the main app) is running on the sender machine "
+                "and both computers are on the same WiFi / LAN segment."
+            )
+        self._inlet = StreamInlet(streams[0])
+        info = self._inlet.info()
+        logger.info(
+            "LSLUnicorn connected to '%s'  channels=%d  srate=%.0f Hz  source='%s'",
+            info.name(), info.channel_count(), info.nominal_srate(), info.source_id(),
+        )
+
+    def close(self) -> None:
+        if self._inlet is not None:
+            try:
+                self._inlet.close_stream()
+            except Exception:
+                pass
+            self._inlet = None
+        logger.info("LSLUnicorn: stream closed.")
+
+    def get_data(self, n_samples: int) -> np.ndarray:
+        """
+        Block until exactly n_samples are available from the LSL stream.
+        Returns (n_samples, N_CHANNELS) float64 array — same shape as
+        RealUnicorn.get_data() so the acquisition loop is unaffected.
+        """
+        deadline = time.monotonic() + self.GET_DATA_TIMEOUT
+        with self._lock:
+            while len(self._pending) < n_samples:
+                if time.monotonic() > deadline:
+                    raise RuntimeError(
+                        f"LSLUnicorn timeout: waited {self.GET_DATA_TIMEOUT}s for "
+                        f"{n_samples} samples (only {len(self._pending)} arrived). "
+                        "Check that the sender is still running."
+                    )
+                chunk, _ = self._inlet.pull_chunk(
+                    max_samples=n_samples - len(self._pending),
+                    timeout=self.PULL_TIMEOUT,
+                )
+                if chunk:
+                    self._pending.extend(chunk)
+            out = np.array(self._pending[:n_samples], dtype=np.float64)
+            self._pending = self._pending[n_samples:]
+        return out
+
+
 # ── Ring Buffer ────────────────────────────────────────────────────────────────
 class RingBuffer:
     """
@@ -313,6 +402,9 @@ class BrainEngine:
     ):
         if device is not None:
             self._device = device
+        elif serial is not None and serial.upper() == "LSL":
+            logger.info("UNICORN_SERIAL=LSL — using LSLUnicorn (network receiver mode).")
+            self._device = LSLUnicorn()
         elif serial is not None:
             self._device = RealUnicorn(serial)
         else:
@@ -365,19 +457,23 @@ class BrainEngine:
     # ── Acquisition Loop ───────────────────────────────────────────────────────
 
     def _acquisition_loop(self) -> None:
-        """Bucle de adquisición que también transmite por LSL."""
-        
-        # 1. Configurar el canal de transmisión LSL
-        info = StreamInfo(
-            name='Unicorn_EEG', 
-            type='EEG', 
-            channel_count=N_CHANNELS, 
-            nominal_srate=SAMPLE_RATE, 
-            channel_format='float32', 
-            source_id=self._device.serial if hasattr(self._device, 'serial') else 'mock_123'
-        )
-        outlet = StreamOutlet(info)
-        print("Transmisión LSL iniciada. Otras computadoras ya pueden escuchar.")
+        """Acquisition loop — also broadcasts over LSL unless we ARE an LSL receiver."""
+
+        # Only create a broadcast outlet when we are the source (Real or Mock device).
+        # If we are already consuming an LSL stream (LSLUnicorn), do not re-broadcast
+        # — that would just echo the signal back onto the network under the same name.
+        outlet = None
+        if not isinstance(self._device, LSLUnicorn):
+            info = StreamInfo(
+                name='Unicorn_EEG',
+                type='EEG',
+                channel_count=N_CHANNELS,
+                nominal_srate=SAMPLE_RATE,
+                channel_format='float32',
+                source_id=self._device.serial if hasattr(self._device, 'serial') else 'mock_123',
+            )
+            outlet = StreamOutlet(info)
+            logger.info("LSL broadcast started — other machines can now listen.")
 
         consecutive_errors = 0
         while self._running:
@@ -385,12 +481,12 @@ class BrainEngine:
                 # Obtenemos los datos (ej. 4 muestras)
                 samples = self._device.get_data(GETDATA_BLOCK)
                 
-                # Guardamos localmente (tu código original)
+                # Store locally in ring buffer
                 self._buffer.write(samples)
-                
-                # ¡NUEVO! Enviamos por WiFi a cualquier PC que esté escuchando
-                # pylsl espera una lista de listas, así que convertimos el array de numpy
-                outlet.push_chunk(samples.tolist())
+
+                # Broadcast over LAN (only when we are the source, not a receiver)
+                if outlet is not None:
+                    outlet.push_chunk(samples.tolist())
                 
                 consecutive_errors = 0
             except RuntimeError as exc:
@@ -453,6 +549,7 @@ class BrainEngine:
             return list(self._markers)
 
     def clear_markers(self) -> None:
+        """Discard all recorded markers (call between authentication sessions)."""
         with self._markers_lock:
             self._markers.clear()
 
@@ -468,4 +565,5 @@ class BrainEngine:
 
     @property
     def buffer(self) -> RingBuffer:
+        """Direct access to the ring buffer (e.g. for live visualisers)."""
         return self._buffer

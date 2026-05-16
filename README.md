@@ -1,4 +1,4 @@
-# 🧠 Soude — Brainwave Password Manager
+# 🧠 Soude — Brainwave Password Manager.
 
 > **Your password is in your head. Literally.**
 

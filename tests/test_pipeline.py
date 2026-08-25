@@ -1,12 +1,13 @@
 """
-test_pipeline.py — Soude Signal Pipeline Validator
-Run this WITHOUT a headset to verify the full pipeline end-to-end.
-Prints pass/fail for each stage and ends with an auth decision.
+tests/test_pipeline.py — Soude Signal Pipeline Validator
 
-Usage:
-    python test_pipeline.py
+Corre SIN casco (MockUnicorn) y valida el pipeline completo de punta a punta.
+
+    pytest                          # forma recomendada
+    python tests/test_pipeline.py   # tambien funciona como script
 """
 
+import json
 import logging
 import sys
 import time
@@ -22,41 +23,39 @@ logging.basicConfig(
 )
 
 from neurolock.brain_engine import (
-    BrainEngine, MockUnicorn, SAMPLE_RATE, N_CHANNELS,
-    P300_CHANNELS, BUFFER_SAMPLES,
+    BrainEngine, MockUnicorn, RingBuffer, StimulusMarker,
+    SAMPLE_RATE, N_CHANNELS, P300_CHANNELS, BUFFER_SAMPLES,
 )
 from neurolock.filters import build_bandpass_sos, build_notch_sos
 from neurolock.signal_processing import (
     AuthenticationPipeline,
+    AuthResult,
     OnlineFilter,
     filter_epoch,
+    EPOCH_DURATION_S,
     EPOCH_SAMPLES,
 )
 from neurolock.stimulus_runner import StimulusRunner, ParadigmConfig
+from neurolock.data_logger import SessionLogger
+from neurolock.signal_quality import ImpedanceChecker
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 def section(title: str):
-    print(f"\n{'─'*60}")
+    print(f"\n{'-' * 60}")
     print(f"  {title}")
-    print(f"{'─'*60}")
+    print(f"{'-' * 60}")
 
 
 def ok(msg: str):
-    print(f"  ✓  {msg}")
-
-
-def fail(msg: str):
-    print(f"  ✗  {msg}")
-    raise AssertionError(msg)
+    print(f"  [OK] {msg}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_ring_buffer():
-    section("1 · Ring Buffer")
-    from neurolock.brain_engine import RingBuffer
+    section("1 - Ring Buffer")
 
     rb = RingBuffer()
     chunk = np.random.randn(100, N_CHANNELS)
@@ -76,13 +75,12 @@ def test_ring_buffer():
     ok("wrap-around write succeeds")
 
     # Reading data older than buffer should return None
-    result = rb.read_from(0, 10)
-    assert result is None
+    assert rb.read_from(0, 10) is None
     ok("read_from on expired index returns None")
 
 
 def test_filters():
-    section("2 · Filters")
+    section("2 - Filters")
 
     bp_sos = build_bandpass_sos(1.0, 10.0, order=4)
     assert bp_sos.shape[1] == 6
@@ -92,124 +90,125 @@ def test_filters():
     assert notch_sos.ndim == 2
     ok("notch SOS constructed")
 
-    # Apply to synthetic sine (10 Hz should pass, 60 Hz should be attenuated)
     t = np.linspace(0, 1.0, SAMPLE_RATE)
     sig_10hz = 10.0 * np.sin(2 * np.pi * 10 * t)
     sig_60hz = 10.0 * np.sin(2 * np.pi * 60 * t)
-    combined = (sig_10hz + sig_60hz)[:, np.newaxis].repeat(N_CHANNELS, axis=1)
 
-    filtered = filter_epoch(combined)
-    power_60hz_in  = float(np.var(sig_60hz))
-    power_60hz_out = float(np.var(filtered[:, 0]) - np.var(sig_10hz * 0.9))
+    # 60 Hz (ruido de linea) debe quedar practicamente eliminado
+    sixty = sig_60hz[:, np.newaxis].repeat(N_CHANNELS, axis=1)
+    atten_60 = float(np.var(filter_epoch(sixty)[:, 0]) / np.var(sig_60hz))
+    assert atten_60 < 0.01, f"60 Hz apenas atenuado: x{atten_60:.4f}"
+    ok(f"60 Hz attenuated to {atten_60 * 100:.2f}% of input power")
 
-    # After filtering the 60 Hz component should be greatly reduced
-    ok(f"filter_epoch runs on (n={SAMPLE_RATE}, C={N_CHANNELS}) without error")
+    # 10 Hz (borde de la banda P300) debe sobrevivir razonablemente
+    ten = sig_10hz[:, np.newaxis].repeat(N_CHANNELS, axis=1)
+    surv_10 = float(np.var(filter_epoch(ten)[:, 0]) / np.var(sig_10hz))
+    assert surv_10 > 0.1, f"10 Hz sobre-atenuado: x{surv_10:.4f}"
+    ok(f"10 Hz survives with {surv_10 * 100:.1f}% of input power")
 
     filt = OnlineFilter()
     chunk = np.random.randn(4, N_CHANNELS)
-    out = filt.process(chunk)
-    assert out.shape == chunk.shape
+    assert filt.process(chunk).shape == chunk.shape
     ok("OnlineFilter.process preserves shape")
 
 
 def test_mock_unicorn_p300():
-    section("3 · MockUnicorn P300 injection")
+    section("3 - MockUnicorn P300 injection")
     mock = MockUnicorn()
     mock.open()
 
-    # Pull baseline (no P300)
     baseline = mock.get_data(SAMPLE_RATE)
     baseline_mean = float(np.mean(baseline[:, P300_CHANNELS[0]]))
 
-    # Inject P300 then pull
     mock.notify_target()
-    injected = mock.get_data(SAMPLE_RATE)   # should contain the injected peak
+    injected = mock.get_data(SAMPLE_RATE)
     peak = float(np.max(injected[:, P300_CHANNELS[0]]))
 
     assert peak > baseline_mean + 2.0, (
-        f"Expected P300 peak > baseline+2µV, got peak={peak:.2f}, base={baseline_mean:.2f}"
+        f"Expected P300 peak > baseline+2uV, got peak={peak:.2f}, base={baseline_mean:.2f}"
     )
-    ok(f"P300 peak detected: {peak:.2f} µV (baseline mean {baseline_mean:.2f} µV)")
+    ok(f"P300 peak detected: {peak:.2f} uV (baseline mean {baseline_mean:.2f} uV)")
     mock.close()
 
 
 def test_full_pipeline():
-    section("4 · Full Authentication Pipeline (Mock)")
+    section("4 - Full Authentication Pipeline (Mock)")
 
     PASSWORD_IDS = [3, 11, 17]
 
-    engine = BrainEngine(device=MockUnicorn())
+    # Amplitud alta para que la deteccion no dependa de la suerte del ruido
+    # rosa (sigma ~30 uV): esto valida el PIPELINE, no la sensibilidad al SNR.
+    engine = BrainEngine(device=MockUnicorn(p300_amplitude_uv=20.0))
     engine.start()
+    try:
+        pipeline = AuthenticationPipeline(engine, target_ids=PASSWORD_IDS)
 
-    pipeline = AuthenticationPipeline(engine, target_ids=PASSWORD_IDS)
+        completed_event = [False]
 
-    completed_event = [False]
-    result_holder   = [None]
+        def on_show(image_id: int, is_target: bool):
+            # Notify mock when a target is shown so P300 is injected
+            if is_target and isinstance(engine._device, MockUnicorn):
+                engine._device.notify_target()
 
-    def on_show(image_id: int, is_target: bool):
-        # Notify mock when a target is shown so P300 is injected
-        if is_target and isinstance(engine._device, MockUnicorn):
-            engine._device.notify_target()
+        def on_complete(events):
+            completed_event[0] = True
 
-    def on_blank():
-        pass
+        cfg = ParadigmConfig(
+            total_images=20,
+            n_targets=len(PASSWORD_IDS),
+            target_repeats=5,
+            nontarget_repeats=1,
+            randomize=False,
+        )
+        runner = StimulusRunner(engine, cfg)
+        runner.set_password_ids(PASSWORD_IDS)
+        runner.set_callbacks(on_show=on_show, on_blank=lambda: None, on_complete=on_complete)
+        ok("StimulusRunner configured")
 
-    def on_complete(events):
-        completed_event[0] = True
+        runner.run_async()
+        assert runner.wait_for_completion(), "Paradigm did not complete in time"
+        assert completed_event[0]
+        ok(f"Paradigm completed in ~{runner.total_duration_s:.1f} s")
 
-    cfg = ParadigmConfig(
-        total_images=20,
-        n_targets=len(PASSWORD_IDS),
-        target_repeats=5,
-        nontarget_repeats=1,
-        randomize=False,
-    )
-    runner = StimulusRunner(engine, cfg)
-    runner.set_password_ids(PASSWORD_IDS)
-    runner.set_callbacks(on_show=on_show, on_blank=on_blank, on_complete=on_complete)
+        # Wait for the last epoch's post-stimulus samples to land in the buffer
+        time.sleep(EPOCH_DURATION_S + 0.1)
 
-    ok("StimulusRunner configured")
+        result = pipeline.evaluate()
+        ok(f"Auth evaluated: granted={result.granted}  "
+           f"delta={result.delta_uv:.2f} uV  SNR={result.snr_db:.1f} dB")
+        ok(f"Message: {result.message}")
 
-    runner.run_async()
-    done = runner.wait_for_completion(timeout=60.0)
-    assert done, "Paradigm did not complete within 60 s"
-    ok(f"Paradigm completed in ~{runner.total_duration_s:.1f} s")
-
-    # Wait for the last epoch's post-stimulus samples to land in the buffer
-    from neurolock.signal_processing import EPOCH_DURATION_S
-    time.sleep(EPOCH_DURATION_S + 0.1)
-    ok("Post-paradigm buffer wait complete")
-
-    result = pipeline.evaluate()
-    ok(
-        f"Auth evaluated: granted={result.granted}  "
-        f"Δ={result.target_peak_uv - result.nontarget_peak_uv:.2f} µV  "
-        f"SNR={result.snr_db:.1f} dB"
-    )
-    ok(f"Message: {result.message}")
-
-    engine.stop()
-    return result
+        # Con P300 inyectado el sistema DEBE conceder acceso (delta positivo)
+        assert result.granted, f"Mock P300 should be granted: {result.message}"
+        assert result.delta_uv > 0, "delta must be positive for a genuine P300"
+        assert result.n_target >= 5 and result.n_nontarget >= 5
+    finally:
+        engine.stop()
 
 
-def test_data_logger():
-    section("5 · Data Logger")
-    from neurolock.data_logger import SessionLogger
-    from neurolock.signal_quality import ImpedanceChecker
-    from neurolock.brain_engine import StimulusMarker
+def test_data_logger(tmp_path=None):
+    section("5 - Data Logger")
 
-    logger_inst = SessionLogger(session_id="test_session")
+    logger_inst = SessionLogger(session_id="test_session", session_type="genuine")
     marker = StimulusMarker(image_id=3, buffer_index=100, timestamp=1.0, is_target=True)
     epoch  = np.random.randn(EPOCH_SAMPLES, N_CHANNELS)
     logger_inst.log_marker(marker, epoch)
     ok("log_marker accepted")
 
-    from neurolock.signal_processing import AuthResult
     result = AuthResult(granted=True, target_peak_uv=6.0, nontarget_peak_uv=1.5,
-                        snr_db=12.3, message="Test pass")
+                        snr_db=12.3, message="Test pass",
+                        delta_uv=4.5, pre_sigma_uv=0.8, n_target=15, n_nontarget=16)
     logger_inst.log_auth_result(result)
     logger_inst.flush()
     ok(f"Session flushed to {logger_inst.session_dir}")
+
+    # auth_result.json debe traer las metricas estructuradas y el tipo de sesion
+    payload = json.loads((logger_inst.session_dir / "auth_result.json").read_text("utf-8"))
+    assert payload["delta_uv"] == 4.5
+    assert payload["pre_sigma_uv"] == 0.8
+    assert payload["session_type"] == "genuine"
+    assert payload["n_target"] == 15
+    ok("auth_result.json contains structured metrics + session_type")
 
     checker = ImpedanceChecker()
     snap = np.random.randn(BUFFER_SAMPLES, N_CHANNELS) * 8
@@ -225,13 +224,10 @@ if __name__ == "__main__":
         test_ring_buffer()
         test_filters()
         test_mock_unicorn_p300()
-        result = test_full_pipeline()
+        test_full_pipeline()
         test_data_logger()
-
         section("SUMMARY")
-        print(f"\n  All tests passed.")
-        print(f"  Final auth decision: {'✓ GRANTED' if result.granted else '✗ DENIED'}")
-        print()
+        print("\n  All tests passed.\n")
     except AssertionError as e:
         print(f"\n  FATAL: {e}")
         raise SystemExit(1)

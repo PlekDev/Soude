@@ -163,12 +163,17 @@ class MockUnicorn(UnicornInterface):
 
     _P300_LATENCY_SAMPLES = int(0.30 * SAMPLE_RATE)   # 300 ms
     _P300_WIDTH_SAMPLES   = int(0.10 * SAMPLE_RATE)   # ~100 ms FWHM
-    _P300_AMPLITUDE_UV    = 8.0                        # µV peak
+    _P300_AMPLITUDE_UV    = 8.0                        # µV peak (realistic default)
 
-    def __init__(self):
+    def __init__(self, p300_amplitude_uv: float = _P300_AMPLITUDE_UV):
+        # p300_amplitude_uv: tests may raise this so the injected P300 clears
+        # the pink-noise floor deterministically; 8 µV is the realistic default.
+        self._amplitude = p300_amplitude_uv
         self._rng = np.random.default_rng(seed=42)
         self._pending_p300: list[int] = []   # samples until P300 peak injection
         self._lock = threading.Lock()
+        self._t0: Optional[float] = None     # pacing reference (drift-free)
+        self._served = 0                     # total samples served
 
     def open(self) -> None:
         logger.info("MockUnicorn opened (simulation mode).")
@@ -187,8 +192,14 @@ class MockUnicorn(UnicornInterface):
         Cz, Pz, Oz.  Sleeps to pace at real hardware sample rate so the ring
         buffer doesn't overflow in test/simulator mode.
         """
-        # Block for the natural duration of n_samples (mimics hardware behaviour)
-        time.sleep(n_samples / SAMPLE_RATE)
+        # Pace against an absolute schedule (not a per-call sleep) so overhead
+        # doesn't accumulate drift between wall clock and samples served.
+        if self._t0 is None:
+            self._t0 = time.monotonic()
+        self._served += n_samples
+        delay = self._t0 + self._served / SAMPLE_RATE - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
         # 1/f noise approximation: white noise low-passed in frequency
         white = self._rng.standard_normal((n_samples, N_CHANNELS)) * 6.0
         # Simple IIR to tint toward pink (b=1, a=[1, -0.98])
@@ -208,7 +219,7 @@ class MockUnicorn(UnicornInterface):
                     dist = abs(s - remaining)
                     if dist < self._P300_WIDTH_SAMPLES:
                         sigma = self._P300_WIDTH_SAMPLES / 2.5
-                        amp = self._P300_AMPLITUDE_UV * np.exp(
+                        amp = self._amplitude * np.exp(
                             -0.5 * (dist / sigma) ** 2
                         )
                         for ch in P300_CHANNELS:

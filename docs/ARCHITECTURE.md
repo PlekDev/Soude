@@ -1,4 +1,11 @@
 # Soude — Architecture & Team Playbook
+
+> **Nota (agosto 2026):** este documento es el playbook original del hackathon
+> Br41n.IO y se conserva como referencia histórica.  La estructura actual del
+> repo (paquete `neurolock/`, `ml/`, `tools/`, `tests/`) está descrita en el
+> [README](../README.md); los nombres de archivo y rutas de este documento ya
+> no corresponden uno a uno.
+
 ## Br41n.IO Hackathon — 36 Hours Remaining
 
 ---

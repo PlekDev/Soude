@@ -49,6 +49,12 @@ class AuthResult:
     nontarget_peak_uv: float
     snr_db: float
     message: str
+    # Structured metrics for offline analysis (FAR/FRR/ROC re-scoring with
+    # different thresholds needs numbers, not a human-readable message).
+    delta_uv: float = 0.0          # mean(target − non-target) in the P300 window
+    pre_sigma_uv: float = 0.0      # σ of the pre-stimulus difference (noise floor)
+    n_target: int = 0
+    n_nontarget: int = 0
 
 
 # ── Filter Construction ────────────────────────────────────────────────────────
@@ -122,7 +128,7 @@ def baseline_correct(epoch: np.ndarray, baseline_samples: int = BASELINE_SAMPLES
 def is_artifact(epoch: np.ndarray, threshold_uv: float = 100.0) -> bool:
     """
     Reject epoch if any channel exceeds threshold_uv peak-to-peak.
-    After bandpass filtering (0.5–30 Hz), genuine EEG should be 10–100 µV p-p.
+    After bandpass filtering (1–10 Hz), genuine EEG should be 10–100 µV p-p.
     Artifacts from poor contact, cable movement, or mains interference appear
     as bursts well above 100 µV and must be rejected.
     Typical blink artifact: >150 µV on frontal channels.
@@ -238,20 +244,12 @@ class SignalAverager:
 
 # ── P300 Detector ──────────────────────────────────────────────────────────────
 
-def compute_p300_peak(average: np.ndarray) -> float:
-    """
-    Given a grand-average epoch (EPOCH_SAMPLES, N_CHANNELS),
-    return the mean amplitude (µV) across P300_CHANNELS in the 250–500 ms window.
-    """
-    window = average[P300_ONSET:P300_OFFSET, :]
-    p300_channels_data = window[:, P300_CHANNELS]   # (window_samples, 3)
-    return float(p300_channels_data.mean())
-
-
 def compute_snr_db(target_peak: float, nontarget_peak: float, noise_std: float) -> float:
     """Signal-to-noise ratio in dB.  noise_std from non-target variability."""
     signal_power = (target_peak - nontarget_peak) ** 2
-    noise_power  = max(noise_std ** 2, 1e-9)
+    if signal_power <= 0.0:
+        return -99.0   # identical averages → no signal; avoid log10(0) = -inf
+    noise_power = max(noise_std ** 2, 1e-9)
     return float(10.0 * np.log10(signal_power / noise_power))
 
 
@@ -329,6 +327,8 @@ class AuthenticationPipeline:
                     f"Insufficient target epochs: "
                     f"{self._averager.n_target}/{MIN_EPOCHS} required."
                 ),
+                n_target=self._averager.n_target,
+                n_nontarget=self._averager.n_nontarget,
             )
         if self._averager.n_nontarget < MIN_EPOCHS:
             return AuthResult(
@@ -340,6 +340,8 @@ class AuthenticationPipeline:
                     f"Insufficient non-target epochs: "
                     f"{self._averager.n_nontarget}/{MIN_EPOCHS} required."
                 ),
+                n_target=self._averager.n_target,
+                n_nontarget=self._averager.n_nontarget,
             )
 
         target_avg    = self._averager.target_average()
@@ -380,18 +382,22 @@ class AuthenticationPipeline:
         snr = compute_snr_db(target_peak, nontarget_peak, noise_std)
 
         # Dual-criteria grant: amplitude AND pre-window SNR must both pass.
-        # - abs(delta) >= AUTH_THRESHOLD_UV guards against large-noise sessions.
-        # - abs(delta) >= PRE_SNR_RATIO * noise_std normalises to in-session noise,
+        # The P300 is a POSITIVE deflection (target > non-target on Cz/Pz/Oz),
+        # so delta must be positive: an inverted-polarity difference is not a
+        # P300 and must be denied.  (The old abs(delta) also granted access on
+        # strongly negative differences.)
+        # - delta >= AUTH_THRESHOLD_UV guards against large-noise sessions.
+        # - delta >= PRE_SNR_RATIO * noise_std normalises to in-session noise,
         #   ensuring the P300 window is meaningfully above the pre-stimulus baseline.
         PRE_SNR_RATIO = 1.5          # P300 window must be 1.5× the pre-window σ
-        granted = (abs(delta) >= AUTH_THRESHOLD_UV and
-                   abs(delta) >= PRE_SNR_RATIO * noise_std)
+        granted = (delta >= AUTH_THRESHOLD_UV and
+                   delta >= PRE_SNR_RATIO * noise_std)
 
         msg = (
-            f"GRANTED — mean|ΔP300|={abs(delta):.2f} µV, "
+            f"GRANTED — mean ΔP300={delta:.2f} µV, "
             f"pre_σ={noise_std:.2f} µV, SNR={snr:.1f} dB"
             if granted else
-            f"DENIED — mean|ΔP300|={abs(delta):.2f} µV "
+            f"DENIED — mean ΔP300={delta:.2f} µV "
             f"(need ≥{AUTH_THRESHOLD_UV} µV AND ≥{PRE_SNR_RATIO}×pre_σ={PRE_SNR_RATIO*noise_std:.2f} µV)"
         )
         logger.info("Auth result: %s", msg)
@@ -402,6 +408,10 @@ class AuthenticationPipeline:
             nontarget_peak_uv=nontarget_peak,
             snr_db=snr,
             message=msg,
+            delta_uv=delta,
+            pre_sigma_uv=noise_std,
+            n_target=self._averager.n_target,
+            n_nontarget=self._averager.n_nontarget,
         )
 
     def get_erp_data(self) -> dict:

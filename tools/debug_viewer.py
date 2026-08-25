@@ -877,16 +877,19 @@ class SummaryPanel(QFrame):
         self._n_target.setText(str(len(session.targets)))
         self._n_nontarget.setText(str(len(session.nontargets)))
         self._duration.setText(f"{session.duration_s:.1f}s")
-        msg = ar.get("message", "")
-        # Parse µV and SNR from message if present
-        tgt = ar.get("target_peak_uv", 0.0)
-        nt  = ar.get("nontarget_peak_uv", 0.0)
         snr = ar.get("snr_db", 0.0)
-        self._p300.setText(f"{abs(tgt - nt):.2f} µV")
-        # Extract pre_σ from message string if new format
-        import re
-        m = re.search(r"pre_σ=([\d.]+)", msg)
-        self._pre_sigma.setText(f"{m.group(1)} µV" if m else "—")
+        # Preferir los campos estructurados; caer al parseo del mensaje solo
+        # para sesiones grabadas antes de que existieran.
+        delta = ar.get("delta_uv")
+        if delta is None:
+            delta = ar.get("target_peak_uv", 0.0) - ar.get("nontarget_peak_uv", 0.0)
+        self._p300.setText(f"{delta:.2f} µV")
+        pre = ar.get("pre_sigma_uv")
+        if pre is None:
+            import re
+            m = re.search(r"pre_σ=([\d.]+)", ar.get("message", ""))
+            pre = float(m.group(1)) if m else None
+        self._pre_sigma.setText(f"{pre:.2f} µV" if pre is not None else "—")
         self._snr.setText(f"{snr:.1f} dB")
 
 

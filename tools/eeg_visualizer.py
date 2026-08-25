@@ -257,8 +257,10 @@ class WaveformWidget(QWidget):
             painter.setPen(base_pen)
             painter.drawLine(ML, int(y_center), ML + plot_w, int(y_center))
 
-            # Scale factor
-            signal = data[:, ch]
+            # Scale factor — remove the DC offset first: the real Unicorn sits
+            # at ~200,000 µV baseline and would pin the trace to the lane edge
+            # (the mock is zero-mean, which hid this).
+            signal = data[:, ch] - float(np.mean(data[:, ch]))
             if self._autoscale:
                 std   = float(np.std(signal)) or 1.0
                 scale = (ch_h * 0.42) / (3.0 * std)
@@ -521,6 +523,9 @@ class SidebarWidget(QWidget):
             # ── Signal quality (last 1 s, all channels) ──────────────────────
             q_data = buf.read_from(total - self._RMS_WINDOW, self._RMS_WINDOW)
             if q_data is not None:
+                # Centrar por canal: el offset DC del hardware real (~200 kµV)
+                # saturaría el RMS y todas las barras de calidad.
+                q_data = q_data - q_data.mean(axis=0, keepdims=True)
                 rms_all = np.sqrt(np.mean(q_data ** 2, axis=0))   # shape (8,)
                 # Normalise to ±150 µV expected full-scale
                 for i in range(N_CHANNELS):
@@ -546,7 +551,8 @@ class SidebarWidget(QWidget):
             # ── Band power (last 2 s, Cz channel) ────────────────────────────
             bp_data = buf.read_from(total - self._BP_WINDOW, self._BP_WINDOW)
             if bp_data is not None:
-                cz_sig = bp_data[:, 2].reshape(-1, 1)  # (n, 1)
+                cz = bp_data[:, 2]
+                cz_sig = (cz - float(cz.mean())).reshape(-1, 1)  # (n, 1), sin DC
                 bp_rms = []
                 for name, *_ in BANDS:
                     sos     = _BAND_SOS[name]

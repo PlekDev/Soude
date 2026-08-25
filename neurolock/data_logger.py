@@ -37,17 +37,23 @@ class SessionLogger:
             summary.txt       — human-readable summary
     """
 
-    def __init__(self, session_id: Optional[str] = None):
+    def __init__(self, session_id: Optional[str] = None, session_type: str = "genuine"):
+        """
+        session_type: "genuine" (usuario legítimo) o "impostor" (sesión de
+        ataque controlado para medir FAR).  Se guarda en auth_result.json para
+        que el análisis offline nunca mezcle ambos tipos de datos.
+        """
         sid = session_id or _session_id()
         self._dir = LOG_DIR / sid
         self._dir.mkdir(parents=True, exist_ok=True)
 
+        self._session_type = session_type
         self._marker_rows: list[dict] = []
         self._epochs: dict[str, np.ndarray] = {}   # key: "epoch_<idx>"
         self._auth_result: Optional[AuthResult] = None
         self._erp_data: Optional[dict] = None
 
-        logger.info("Session log directory: %s", self._dir)
+        logger.info("Session log directory: %s (%s)", self._dir, session_type)
 
     # ── Markers ────────────────────────────────────────────────────────────────
 
@@ -101,8 +107,15 @@ class SessionLogger:
             return
         payload = {
             "granted":          self._auth_result.granted,
+            "session_type":     self._session_type,
             "target_peak_uv":   self._auth_result.target_peak_uv,
             "nontarget_peak_uv": self._auth_result.nontarget_peak_uv,
+            # Métricas estructuradas: permiten recalcular FAR/FRR/ROC offline
+            # con otros umbrales sin parsear el mensaje humano.
+            "delta_uv":         self._auth_result.delta_uv,
+            "pre_sigma_uv":     self._auth_result.pre_sigma_uv,
+            "n_target":         self._auth_result.n_target,
+            "n_nontarget":      self._auth_result.n_nontarget,
             "snr_db":           self._auth_result.snr_db,
             "message":          self._auth_result.message,
             "erp_data":         self._erp_data,
@@ -117,6 +130,7 @@ class SessionLogger:
             "=" * 60,
             f"SOUDE SESSION — {self._dir.name}",
             "=" * 60,
+            f"Session type:    {self._session_type}",
             f"Total stimuli:   {len(self._marker_rows)}",
             f"Epochs saved:    {len(self._epochs)}",
         ]

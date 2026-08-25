@@ -261,9 +261,12 @@ class ParadigmWorker(QObject):
         # Re-stamp is_target on all markers now that the full sequence is done.
         # (set_targets was called at __init__ before any markers existed.)
         self._engine.set_targets(self._password_ids)
-        # Write session log
+        # Write session log.  SOUDE_SESSION_TYPE=impostor marca sesiones de
+        # ataque controlado (para FAR) sin mezclarlas con las genuinas.
         try:
-            session = SessionLogger()
+            session = SessionLogger(
+                session_type=os.environ.get("SOUDE_SESSION_TYPE", "genuine")
+            )
             markers = self._engine.get_markers()
             for m in markers:
                 epoch = self._engine.get_epoch(m)
@@ -482,8 +485,10 @@ class LiveSignalVisualizerWidget(QWidget):
             painter.setPen(base_pen)
             painter.drawLine(ml, int(y_center), ml + plot_w, int(y_center))
 
-            # Signal trace
-            signal = data[:, ch]
+            # Signal trace — remove the DC offset first: the real Unicorn sits
+            # at ~200,000 µV baseline and would pin the trace to the lane edge
+            # (the mock is zero-mean, which hid this).
+            signal = data[:, ch] - float(np.mean(data[:, ch]))
             std    = float(np.std(signal)) or 1.0
             scale  = (ch_h * 0.42) / (3.0 * std)   # 3-sigma fills ~42 % of lane
 

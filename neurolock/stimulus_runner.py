@@ -24,7 +24,7 @@ N_TARGETS       = 3        # Password images (appear once each guaranteed)
 TARGET_REPEATS    = 5      # Repetitions per target image
 NONTARGET_REPEATS = 5      # Repetitions per non-target image
 # ↑ Both equal → target rate = 3/20 = 15%  (oddball paradigm requires < 20%)
-# Total events: 3×5 + 17×5 = 100  |  Duration: ~50 s  |  Target epochs: 15
+# Total events: 3×5 + 17×5 = 100  |  Duration: 100×(0.500+0.075) ≈ 57.5 s  |  Target epochs: 15
 
 
 @dataclass
@@ -59,8 +59,8 @@ class StimulusRunner:
 
     Frame-perfect coupling:
         `on_show` is called, THEN mark_stimulus() fires, in the same
-        scheduler tick.  Wall-clock drift across 20 images at 400 ms SOA
-        is <1 ms on a modern CPU with this busy-wait approach.
+        scheduler tick.  Wall-clock drift across the 100-event sequence
+        (500 ms SOA + 75 ms blank) is <1 ms with this busy-wait approach.
 
     Usage:
         runner = StimulusRunner(engine, config)
@@ -116,7 +116,6 @@ class StimulusRunner:
           - Each target appears TARGET_REPEATS times
           - Each non-target appears NONTARGET_REPEATS times
           - No two consecutive events share the same image_id
-          - No two targets appear back-to-back (min 2 non-targets between targets)
         """
         cfg = self._config
 
@@ -128,15 +127,17 @@ class StimulusRunner:
 
         if cfg.randomize:
             max_attempts = 500
-            for attempt in range(max_attempts):
+            for _ in range(max_attempts):
                 random.shuffle(items)
                 if self._sequence_is_valid(items):
                     break
-                if attempt == max_attempts - 1:
-                    logger.warning(
-                        "Could not find valid sequence after %d attempts. "
-                        "Using best effort.", max_attempts
-                    )
+            else:
+                # Antes se aceptaba en silencio una secuencia inválida; mejor
+                # tronar claro que evaluar un paradigma mal construido.
+                raise RuntimeError(
+                    f"Could not build a valid stimulus sequence after "
+                    f"{max_attempts} shuffles — check the paradigm config."
+                )
         else:
             items.sort(key=lambda x: (x[1], x[0]))  # targets distributed
 
@@ -202,7 +203,12 @@ class StimulusRunner:
         return self._sequence
 
     def run_async(self) -> None:
-        """Non-blocking version — runs in a background thread."""
+        """
+        Non-blocking version — runs in a background thread.
+        NOTE: the on_show/on_blank/on_complete callbacks fire on that thread;
+        UI code must marshal them to the UI thread (the app does this with
+        Qt signals in ParadigmWorker).
+        """
         self._thread = threading.Thread(
             target=self.run_sync,
             name="Stimulus-Runner",
@@ -210,8 +216,14 @@ class StimulusRunner:
         )
         self._thread.start()
 
-    def wait_for_completion(self, timeout: float = 30.0) -> bool:
-        """Block until run completes or timeout expires. Returns True if done."""
+    def wait_for_completion(self, timeout: Optional[float] = None) -> bool:
+        """
+        Block until the run completes or timeout expires.  Returns True if done.
+        Default timeout = sequence duration + 10 s margin (the old fixed 30 s
+        was shorter than the ~57.5 s paradigm and flagged healthy runs as failed).
+        """
+        if timeout is None:
+            timeout = self.total_duration_s + 10.0
         return self._done_event.wait(timeout=timeout)
 
     def abort(self) -> None:

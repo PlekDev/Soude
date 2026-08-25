@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 
-from brain_engine import BrainEngine, CH_C3, CH_C4, SAMPLE_RATE
-from filters import build_mu_beta_chain, apply_filter_chain
+from neurolock.brain_engine import BrainEngine, CH_C3, CH_C4, SAMPLE_RATE
+from neurolock.filters import build_mu_beta_chain, apply_filter_chain
 
 # ── Configuración ─────────────────────────────────────────────────────────────
 load_dotenv()

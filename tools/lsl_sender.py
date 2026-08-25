@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from brain_engine import BrainEngine, MockUnicorn
+from neurolock.brain_engine import BrainEngine, MockUnicorn
 
 
 def main() -> None:

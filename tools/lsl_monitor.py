@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from brain_engine import BrainEngine, MockUnicorn, CHANNEL_NAMES
+from neurolock.brain_engine import BrainEngine, MockUnicorn, CHANNEL_NAMES
 
 
 def main() -> None:

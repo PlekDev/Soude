@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.signal import butter, iirnotch, sosfilt, tf2sos
 
-from brain_engine import SAMPLE_RATE
+from neurolock.brain_engine import SAMPLE_RATE
 
 # Filtros individuales
 

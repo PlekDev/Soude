@@ -8,10 +8,10 @@ import logging
 import random
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional
 
-from brain_engine import BrainEngine, StimulusMarker
+from neurolock.brain_engine import BrainEngine, StimulusMarker
 
 logger = logging.getLogger(__name__)
 

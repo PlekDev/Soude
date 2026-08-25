@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import numpy as np
 from PyQt6.QtCore import Qt, QPointF, QRectF, pyqtSlot
 from PyQt6.QtGui import (
@@ -54,7 +56,7 @@ class C:
     P300_ZONE = "#00e5ff"
 
 # Canonical montage from the acquisition core (single source of truth)
-from brain_engine import CHANNEL_NAMES as CH_NAMES, P300_CHANNELS as P300_CH
+from neurolock.brain_engine import CHANNEL_NAMES as CH_NAMES, P300_CHANNELS as P300_CH
 CH_COLORS  = ["#00e5ff","#7c4dff","#00e676","#ff5252",
               "#ffab40","#ea80fc","#40c4ff","#b2ff59"]
 SAMPLE_RATE = 250
@@ -73,7 +75,8 @@ CATALOG = [
     ("✿","FLOWER"),("⬢","BLOCK"),("☽","MOON"),("⬠","PENT2"),
 ]
 
-LOGS_DIR = Path(__file__).parent / "logs"
+# logs/ vive en la raíz del repo, no junto a este script
+LOGS_DIR = Path(__file__).resolve().parents[1] / "logs"
 
 
 # ── Data model ────────────────────────────────────────────────────────────────

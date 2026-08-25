@@ -8,7 +8,11 @@ Usage:
 """
 
 import logging
+import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 
@@ -16,20 +20,19 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
 )
-logger = logging.getLogger("test_pipeline")
 
-from brain_engine import (
+from neurolock.brain_engine import (
     BrainEngine, MockUnicorn, SAMPLE_RATE, N_CHANNELS,
     P300_CHANNELS, BUFFER_SAMPLES,
 )
-from filters import build_bandpass_sos, build_notch_sos
-from Fase1.signal_processing import (
+from neurolock.filters import build_bandpass_sos, build_notch_sos
+from neurolock.signal_processing import (
     AuthenticationPipeline,
     OnlineFilter,
     filter_epoch,
     EPOCH_SAMPLES,
 )
-from Fase1.stimulus_runner import StimulusRunner, ParadigmConfig
+from neurolock.stimulus_runner import StimulusRunner, ParadigmConfig
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -53,7 +56,7 @@ def fail(msg: str):
 
 def test_ring_buffer():
     section("1 · Ring Buffer")
-    from brain_engine import RingBuffer
+    from neurolock.brain_engine import RingBuffer
 
     rb = RingBuffer()
     chunk = np.random.randn(100, N_CHANNELS)
@@ -173,8 +176,7 @@ def test_full_pipeline():
     ok(f"Paradigm completed in ~{runner.total_duration_s:.1f} s")
 
     # Wait for the last epoch's post-stimulus samples to land in the buffer
-    import time
-    from Fase1.signal_processing import EPOCH_DURATION_S
+    from neurolock.signal_processing import EPOCH_DURATION_S
     time.sleep(EPOCH_DURATION_S + 0.1)
     ok("Post-paradigm buffer wait complete")
 
@@ -192,8 +194,9 @@ def test_full_pipeline():
 
 def test_data_logger():
     section("5 · Data Logger")
-    from data_logger import SessionLogger, ImpedanceChecker
-    from brain_engine import StimulusMarker, RingBuffer
+    from neurolock.data_logger import SessionLogger
+    from neurolock.signal_quality import ImpedanceChecker
+    from neurolock.brain_engine import StimulusMarker
 
     logger_inst = SessionLogger(session_id="test_session")
     marker = StimulusMarker(image_id=3, buffer_index=100, timestamp=1.0, is_target=True)
@@ -201,7 +204,7 @@ def test_data_logger():
     logger_inst.log_marker(marker, epoch)
     ok("log_marker accepted")
 
-    from Fase1.signal_processing import AuthResult
+    from neurolock.signal_processing import AuthResult
     result = AuthResult(granted=True, target_peak_uv=6.0, nontarget_peak_uv=1.5,
                         snr_db=12.3, message="Test pass")
     logger_inst.log_auth_result(result)

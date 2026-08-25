@@ -28,12 +28,12 @@ from PyQt6.QtWidgets import (
     QStatusBar, QVBoxLayout, QWidget,
 )
 
-sys.path.insert(0, str(Path(__file__).parent))
-from brain_engine import (
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from neurolock.brain_engine import (
     BrainEngine, MockUnicorn, RealUnicorn,
     SAMPLE_RATE, N_CHANNELS, CHANNEL_NAMES,
 )
-from filters import build_bandpass_sos, apply_filter_chain
+from neurolock.filters import build_bandpass_sos, apply_filter_chain
 
 logging.basicConfig(
     level=logging.INFO,

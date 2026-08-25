@@ -10,9 +10,9 @@ from typing import Optional
 
 import numpy as np
 from scipy.signal import sosfiltfilt, sosfilt_zi, sosfilt
-from filters import build_p300_chain
+from neurolock.filters import build_p300_chain
 
-from brain_engine import (
+from neurolock.brain_engine import (
     SAMPLE_RATE,
     N_CHANNELS,
     P300_CHANNELS,

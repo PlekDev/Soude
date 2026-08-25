@@ -33,11 +33,12 @@ from PyQt6.QtWidgets import (
     QGraphicsOpacityEffect, QGridLayout, QProgressBar, QMessageBox, QSizePolicy,
 )
 
-from brain_engine import BrainEngine, MockUnicorn, SAMPLE_RATE, N_CHANNELS, CHANNEL_NAMES
-from Fase1.signal_processing import AuthenticationPipeline, AuthResult, EPOCH_DURATION_S
-from Fase1.stimulus_runner import StimulusRunner, ParadigmConfig
-from data_logger import SessionLogger, ImpedanceChecker
-from erp_viewer import ERPViewer
+from neurolock.brain_engine import BrainEngine, MockUnicorn, SAMPLE_RATE, N_CHANNELS, CHANNEL_NAMES
+from neurolock.signal_processing import AuthenticationPipeline, AuthResult, EPOCH_DURATION_S
+from neurolock.stimulus_runner import StimulusRunner, ParadigmConfig
+from neurolock.data_logger import SessionLogger
+from neurolock.signal_quality import ImpedanceChecker
+from neurolock.ui.erp_viewer import ERPViewer
 
 # Extra crash diagnostics (faulthandler, Qt debug logging) only when requested.
 SOUDE_DEBUG = os.environ.get("SOUDE_DEBUG", "").strip().lower() not in ("", "0", "false")
@@ -48,7 +49,9 @@ if SOUDE_DEBUG:
 logger = logging.getLogger(__name__)
 
 # ── Asset directory ────────────────────────────────────────────────────────────
-IMAGES_DIR = Path(__file__).parent / "assets" / "images"
+# assets/ vive en la raíz del repo (dos niveles arriba de neurolock/ui/)
+ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
+IMAGES_DIR = ASSETS_DIR / "images"
 IMAGE_COUNT = 20   # IDs 0–19
 
 UNICORN_SERIAL = os.environ.get("UNICORN_SERIAL", "")  # set to "" for mock
@@ -1054,7 +1057,7 @@ class HomeScreen(QWidget):
 
         logo = QLabel(self)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        _logo_path = Path(__file__).parent / "assets" / "logo.png"
+        _logo_path = ASSETS_DIR / "logo.png"
         if _logo_path.exists():
             _px = QPixmap(str(_logo_path)).scaled(
                 120, 120,
@@ -1234,7 +1237,7 @@ class TitleBar(QWidget):
         lay.setContentsMargins(12, 0, 6, 0)
         lay.setSpacing(8)
 
-        _icon_path = Path(__file__).parent / "assets" / "logo.png"
+        _icon_path = ASSETS_DIR / "logo.png"
         if _icon_path.exists():
             ico = QLabel(self)
             ico.setPixmap(
@@ -1321,7 +1324,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Soude")
         self.setMinimumSize(1024, 768)
         self.setStyleSheet(f"background: {Colors.BG_DEEP};")
-        _icon_path = Path(__file__).parent / "assets" / "logo.png"
+        _icon_path = ASSETS_DIR / "logo.png"
         if _icon_path.exists():
             self.setWindowIcon(QIcon(str(_icon_path)))
 
@@ -1503,11 +1506,11 @@ def main():
     # constructing a second QApplication raises RuntimeError in PyQt6.
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Soude")
-    _app_icon = Path(__file__).parent / "assets" / "logo.png"
+    _app_icon = ASSETS_DIR / "logo.png"
     if _app_icon.exists():
         app.setWindowIcon(QIcon(str(_app_icon)))
     try:
-        for font_path in (Path(__file__).parent / "assets" / "fonts").glob("*.ttf"):
+        for font_path in (ASSETS_DIR / "fonts").glob("*.ttf"):
             QFontDatabase.addApplicationFont(str(font_path))
     except Exception:
         pass

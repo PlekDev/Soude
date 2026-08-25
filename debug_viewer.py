@@ -1147,25 +1147,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main() LOGS_DIR / sys.argv[1]
-
-    app = QApplication(sys.argv)
-    app.setApplicationName("Soude Debug Viewer")
-    win = DebugViewer(initial_session=initial)
-    win.show()
-    sys.exit(app.exec())
-
-
-if __name__ == "__main__":
-    main()
- LOGS_DIR / sys.argv[1]
-
-    app = QApplication(sys.argv)
-    app.setApplicationName("Soude Debug Viewer")
-    win = DebugViewer(initial_session=initial)
-    win.show()
-    sys.exit(app.exec())
-
-
-if __name__ == "__main__":
     main()

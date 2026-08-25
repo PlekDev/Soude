@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Secretos y configuracion local (usar .env.example como plantilla)
+.env
+
+# Datos generados en runtime (regenerables, no van al repo)
+logs/
+data/
+*.pkl
+*.npz
+Fase2/*.csv
+Fase2/Fase2/
+Simulation/*.csv
+ml/*.csv
+
+# Editor / SO
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

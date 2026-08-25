@@ -1,0 +1,8 @@
+numpy
+scipy
+PyQt6
+pylsl
+pandas
+scikit-learn
+python-dotenv
+pytest

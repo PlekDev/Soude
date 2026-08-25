@@ -252,7 +252,20 @@ class ParadigmWorker(QObject):
         )
 
     def run(self) -> None:
-        self._runner.run_sync()
+        try:
+            self._runner.run_sync()
+        except Exception as exc:
+            # Sin esto, una excepción escaparía del slot de Qt (abort/cuelgue
+            # con la UI congelada en SCANNING). Se reporta como resultado
+            # fallido para que la pantalla de resultado y el retry funcionen.
+            logger.exception("Paradigm run failed: %s", exc)
+            self.sig_completed.emit(AuthResult(
+                granted=False,
+                target_peak_uv=0.0,
+                nontarget_peak_uv=0.0,
+                snr_db=-999.0,
+                message=f"Paradigm error: {exc}",
+            ))
 
     def _on_complete(self, events) -> None:
         # Wait for the last epoch's post-stimulus data to arrive in the buffer

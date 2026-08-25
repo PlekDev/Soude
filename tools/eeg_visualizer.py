@@ -29,6 +29,12 @@ from PyQt6.QtWidgets import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# Cargar .env de la raíz (UNICORN_SERIAL / UNICORN_SDK_PATH) igual que la app
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
 from neurolock.brain_engine import (
     BrainEngine, MockUnicorn, RealUnicorn,
     SAMPLE_RATE, N_CHANNELS, CHANNEL_NAMES,
@@ -93,6 +99,11 @@ def detect_device(forced_serial: str = "") -> tuple:
     """
     serial = forced_serial or os.environ.get("UNICORN_SERIAL", "")
     try:
+        # El SDK no es pip-instalable: añadir UNICORN_SDK_PATH (mismo mecanismo
+        # que RealUnicorn.open) antes de intentar importarlo.
+        sdk_path = os.environ.get("UNICORN_SDK_PATH", "").strip()
+        if sdk_path and sdk_path not in sys.path:
+            sys.path.append(sdk_path)
         import UnicornPy  # type: ignore   # only present in the g.tec SDK env
         devices = UnicornPy.GetAvailableDevices(True)
         logger.info("Unicorn devices detected: %s", devices)

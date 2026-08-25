@@ -235,7 +235,7 @@ class MockUnicorn(UnicornInterface):
 # ── LSL Network Receiver ──────────────────────────────────────────────────────
 class LSLUnicorn(UnicornInterface):
     """
-    Receives EEG from an LSL stream broadcast by emisor.py (or by another
+    Receives EEG from an LSL stream broadcast by tools/lsl_sender.py (or by another
     BrainEngine instance running on the LAN).  Implements the same
     UnicornInterface contract as RealUnicorn so the rest of the application
     — stimulus display, authentication pipeline, session logging — works
@@ -246,7 +246,7 @@ class LSLUnicorn(UnicornInterface):
         BrainEngine will automatically pick this class.
 
     Network setup:
-        Sender  : run the main app (or emisor.py) on the machine that has
+        Sender  : run the main app (or tools/lsl_sender.py) on the machine that has
                   the Unicorn dongle/licence.  The LSL stream "Unicorn_EEG"
                   is broadcast automatically.
         Receiver: set UNICORN_SERIAL=LSL and run the main app normally.
@@ -276,7 +276,7 @@ class LSLUnicorn(UnicornInterface):
         if not streams:
             raise RuntimeError(
                 f"No LSL stream named '{self.LSL_STREAM_NAME}' found on the network.\n"
-                "Make sure emisor.py (or the main app) is running on the sender machine "
+                "Make sure tools/lsl_sender.py (or the main app) is running on the sender machine "
                 "and both computers are on the same WiFi / LAN segment."
             )
         self._inlet = StreamInlet(streams[0])

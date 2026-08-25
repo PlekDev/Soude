@@ -170,36 +170,41 @@ class StimulusRunner:
         if not (self._on_show and self._on_blank and self._on_complete):
             raise RuntimeError("Callbacks must be set before calling run_sync().")
 
-        self._sequence = self._build_sequence()
-        self._running  = True
         self._done_event.clear()
+        try:
+            self._sequence = self._build_sequence()
+            self._running  = True
 
-        cfg        = self._config
-        t_start    = time.perf_counter()
+            cfg        = self._config
+            t_start    = time.perf_counter()
 
-        for event in self._sequence:
-            if not self._running:
-                break
+            for event in self._sequence:
+                if not self._running:
+                    break
 
-            # Busy-wait until scheduled flash time for sub-millisecond accuracy
-            target_t = t_start + event.scheduled_time
-            _precise_wait_until(target_t)
+                # Busy-wait until scheduled flash time for sub-millisecond accuracy
+                target_t = t_start + event.scheduled_time
+                _precise_wait_until(target_t)
 
-            # 1. Notify UI to render image (UI must be fast — no heavy ops here)
-            self._on_show(event.image_id, event.is_target)
+                # 1. Notify UI to render image (UI must be fast — no heavy ops here)
+                self._on_show(event.image_id, event.is_target)
 
-            # 2. Record stimulus marker IMMEDIATELY after render call
-            marker = self._engine.mark_stimulus(event.image_id)
-            event.marker = marker
+                # 2. Record stimulus marker IMMEDIATELY after render call
+                marker = self._engine.mark_stimulus(event.image_id)
+                event.marker = marker
 
-            # 3. Wait for blank onset
-            blank_t = target_t + cfg.soa_s
-            _precise_wait_until(blank_t)
-            self._on_blank()
+                # 3. Wait for blank onset
+                blank_t = target_t + cfg.soa_s
+                _precise_wait_until(blank_t)
+                self._on_blank()
 
-        self._running = False
-        self._on_complete(self._sequence)
-        self._done_event.set()
+            self._on_complete(self._sequence)
+        finally:
+            # Pase lo que pase, quien espere en wait_for_completion despierta:
+            # sin esto, una excepción aquí (hilo de run_async) dejaría al
+            # llamador consumiendo el timeout completo sin saber qué pasó.
+            self._running = False
+            self._done_event.set()
         return self._sequence
 
     def run_async(self) -> None:

@@ -7,16 +7,13 @@ Sub-team 4 (Integration/Demo) owns this file.
 import csv
 import json
 import logging
-import os
-import time
-from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
-from brain_engine import StimulusMarker, SAMPLE_RATE, N_CHANNELS
+from brain_engine import StimulusMarker, N_CHANNELS, CHANNEL_NAMES
 from Fase1.signal_processing import AuthResult
 
 logger = logging.getLogger(__name__)
@@ -66,15 +63,6 @@ class SessionLogger:
         if epoch is not None:
             self._epochs[f"epoch_{idx:04d}"] = epoch
 
-    def log_markers_bulk(
-        self,
-        markers: list[StimulusMarker],
-        epochs:  Optional[list[Optional[np.ndarray]]] = None,
-    ) -> None:
-        for i, m in enumerate(markers):
-            ep = epochs[i] if (epochs and i < len(epochs)) else None
-            self.log_marker(m, ep)
-
     # ── Auth Result ────────────────────────────────────────────────────────────
 
     def log_auth_result(self, result: AuthResult, erp_data: Optional[dict] = None) -> None:
@@ -96,7 +84,7 @@ class SessionLogger:
         if not self._marker_rows:
             return
         fields = list(self._marker_rows[0].keys())
-        with open(path, "w", newline="") as f:
+        with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fields)
             writer.writeheader()
             writer.writerows(self._marker_rows)
@@ -119,7 +107,7 @@ class SessionLogger:
             "erp_data":         self._erp_data,
         }
         path = self._dir / "auth_result.json"
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
     def _write_summary(self) -> None:
@@ -163,8 +151,6 @@ class ImpedanceChecker:
     GOOD_VARIANCE_UV2 = 10.0    # µV² lower bound for "live" channel
     BAD_VARIANCE_UV2  = 1e5     # µV² upper bound (above = noise / artifact)
 
-    CHANNEL_NAMES = ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"]
-
     def check(self, snapshot: np.ndarray) -> list[dict]:
         """
         snapshot: (BUFFER_SAMPLES, N_CHANNELS) from RingBuffer.snapshot()
@@ -180,7 +166,7 @@ class ImpedanceChecker:
             else:
                 status = "OK"
             results.append({
-                "name":     self.CHANNEL_NAMES[ch_idx],
+                "name":     CHANNEL_NAMES[ch_idx],
                 "variance": var,
                 "status":   status,
             })

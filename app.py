@@ -21,33 +21,29 @@ import numpy as np
 
 from PyQt6.QtCore import (
     Qt, QTimer, QThread, pyqtSignal, QObject, pyqtSlot, QPropertyAnimation,
-    QEasingCurve, QRectF, QPointF,
+    QEasingCurve, QSize,
 )
 from PyQt6.QtGui import (
-    QFont, QFontDatabase, QPixmap, QPainter, QColor, QPainterPath,
-    QLinearGradient, QRadialGradient, QPen, QBrush, QKeySequence, QIcon,
+    QFont, QFontDatabase, QPixmap, QPainter, QColor,
+    QRadialGradient, QPen, QIcon,
 )
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QStackedWidget, QFrame, QGraphicsDropShadowEffect,
-    QGraphicsOpacityEffect, QGridLayout, QProgressBar, QMessageBox, QDialog, QSizePolicy,
+    QGraphicsOpacityEffect, QGridLayout, QProgressBar, QMessageBox, QSizePolicy,
 )
 
-from brain_engine import BrainEngine, MockUnicorn, SAMPLE_RATE, N_CHANNELS
+from brain_engine import BrainEngine, MockUnicorn, SAMPLE_RATE, N_CHANNELS, CHANNEL_NAMES
 from Fase1.signal_processing import AuthenticationPipeline, AuthResult, EPOCH_DURATION_S
 from Fase1.stimulus_runner import StimulusRunner, ParadigmConfig
-from data_logger import SessionLogger
+from data_logger import SessionLogger, ImpedanceChecker
 from erp_viewer import ERPViewer
 
-import faulthandler
-faulthandler.enable()
-
-import traceback
-original_excepthook = sys.excepthook
-def excepthook(type, value, tb):
-    traceback.print_exception(type, value, tb)
-    original_excepthook(type, value, tb)
-sys.excepthook = excepthook
+# Extra crash diagnostics (faulthandler, Qt debug logging) only when requested.
+SOUDE_DEBUG = os.environ.get("SOUDE_DEBUG", "").strip().lower() not in ("", "0", "false")
+if SOUDE_DEBUG:
+    import faulthandler
+    faulthandler.enable()
 
 logger = logging.getLogger(__name__)
 
@@ -180,13 +176,47 @@ QToolTip {{
 """
 
 
-def add_glow(widget, color: str = Colors.ACCENT, radius: int = 20) -> None:
-    """Apply a drop-shadow glow effect to any widget."""
-    effect = QGraphicsDropShadowEffect(widget)
-    effect.setBlurRadius(radius)
-    effect.setColor(QColor(color))
-    effect.setOffset(0, 0)
-    widget.setGraphicsEffect(effect)
+def render_stimulus_pixmap(img_id: int, size: int, with_label: bool = True) -> QPixmap:
+    """
+    Single source for stimulus rendering: uses assets/images/<id:02d>.png when it
+    exists, otherwise paints the STIMULUS_CATALOG symbol on the shared background.
+    Used by both StimulusScreen (full size) and EnrollmentScreen (thumbnails).
+    """
+    path = IMAGES_DIR / f"{img_id:02d}.png"
+    if path.exists():
+        return QPixmap(str(path)).scaled(
+            size, size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+    # All 20 generated images: SAME background, SAME font size, SAME colour.
+    # Only the symbol/label differ, so the target vs non-target ERP difference
+    # is purely cognitive (P300), not a low-level VEP to brightness or colour.
+    bg_hex, symbol, label = STIMULUS_CATALOG[img_id]
+    px = QPixmap(size, size)
+    px.fill(QColor(bg_hex))
+    painter = QPainter(px)
+    painter.setPen(QColor(255, 255, 255))
+    if with_label:
+        painter.setFont(QFont("Segoe UI Symbol", 150, QFont.Weight.Bold))
+        painter.drawText(
+            0, 20, size, 300,
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+            symbol,
+        )
+        painter.setFont(QFont("Arial", 54, QFont.Weight.Bold))
+        painter.setPen(QColor(255, 255, 255, 210))
+        painter.drawText(
+            0, 320, size, 120,
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+            label,
+        )
+    else:
+        painter.setFont(QFont("Segoe UI Symbol", 36, QFont.Weight.Bold))
+        painter.drawText(px.rect(), Qt.AlignmentFlag.AlignCenter, symbol)
+    painter.end()
+    return px
 
 
 # ── Worker Thread for Paradigm ─────────────────────────────────────────────────
@@ -223,7 +253,6 @@ class ParadigmWorker(QObject):
 
     def _on_complete(self, events) -> None:
         # Wait for the last epoch's post-stimulus data to arrive in the buffer
-        import time
         time.sleep(EPOCH_DURATION_S + 0.1)
         result = self._pipeline.evaluate()
         # Re-stamp is_target on all markers now that the full sequence is done.
@@ -245,6 +274,10 @@ class ParadigmWorker(QObject):
 
     def erp_data(self) -> dict:
         return self._pipeline.get_erp_data()
+
+    @property
+    def pipeline(self) -> AuthenticationPipeline:
+        return self._pipeline
 
 
 # ── Custom Widgets ─────────────────────────────────────────────────────────────
@@ -343,7 +376,7 @@ class LiveSignalVisualizerWidget(QWidget):
     is no performance impact on the acquisition thread.
     """
 
-    CH_NAMES  = ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"]
+    CH_NAMES  = CHANNEL_NAMES
     CH_COLORS = [
         "#a8e600", "#d4f566", "#f0f0f0", "#8a8a8a",
         "#7ecb00", "#c0c0c0", "#5a9900", "#e0e0e0",
@@ -377,8 +410,8 @@ class LiveSignalVisualizerWidget(QWidget):
             if data is not None:
                 self._data = data
                 self.update()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Live visualizer fetch failed: %s", exc)
 
     def start(self) -> None:
         self._timer.start(50)
@@ -596,50 +629,8 @@ class StimulusScreen(QWidget):
         self._preload_images()
 
     def _preload_images(self):
-        target_size = 480
         for img_id in range(IMAGE_COUNT):
-            path = IMAGES_DIR / f"{img_id:02d}.png"
-            if path.exists():
-                px = QPixmap(str(path)).scaled(
-                    target_size, target_size,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                self._cache[img_id] = px
-                continue
-
-            # ── Generated image from STIMULUS_CATALOG ────────────────────────
-            # All 20 images: SAME background, SAME font size, SAME colour.
-            # Only the symbol and label text differ — so the ERP difference
-            # between target and non-target images is purely cognitive (P300),
-            # not a low-level Visual Evoked Potential (VEP) response to
-            # brightness or colour changes.
-            bg_hex, symbol, label = STIMULUS_CATALOG[img_id]
-            px = QPixmap(target_size, target_size)
-            px.fill(QColor(bg_hex))
-            painter = QPainter(px)
-
-            # Large centred symbol — identical font size for every image
-            font_sym = QFont("Segoe UI Symbol", 150, QFont.Weight.Bold)
-            painter.setFont(font_sym)
-            painter.setPen(QColor(255, 255, 255))
-            painter.drawText(
-                0, 20, target_size, 300,
-                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
-                symbol,
-            )
-            # Label text below symbol — same font, same colour, same position
-            font_lbl = QFont("Arial", 54, QFont.Weight.Bold)
-            painter.setFont(font_lbl)
-            painter.setPen(QColor(255, 255, 255, 210))
-            painter.drawText(
-                0, 320, target_size, 120,
-                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
-                label,
-            )
-
-            painter.end()
-            self._cache[img_id] = px
+            self._cache[img_id] = render_stimulus_pixmap(img_id, 480)
 
     @pyqtSlot(int, bool)
     def show_image(self, image_id: int, is_target: bool):
@@ -799,15 +790,6 @@ class ResultScreen(QWidget):
         if pipeline is not None:
             self._erp_viewer.set_pipeline(pipeline)
             self._erp_viewer.start_live(interval_ms=400)
-
-def load_custom_fonts():
-    fonts_dir = Path("assets/fonts")
-    for font_file in fonts_dir.glob("*.ttf"):
-        QFontDatabase.addApplicationFont(str(font_file))
-
-# Uso
-label = QLabel("SOUDE")
-label.setFont(QFont("Orbitron", 28, QFont.Weight.Bold))
 
 # ── Vault Screen ───────────────────────────────────────────────────────────────
 
@@ -995,7 +977,6 @@ class EnrollmentScreen(QWidget):
             btn.setCheckable(True)
             px = self._make_thumb(img_id)
             btn.setIcon(px)
-            from PyQt6.QtCore import QSize
             btn.setIconSize(QSize(self._THUMB - 4, self._THUMB - 4))
             btn.setStyleSheet(self._btn_style(False))
             btn.clicked.connect(lambda checked, i=img_id: self._toggle(i))
@@ -1015,21 +996,8 @@ class EnrollmentScreen(QWidget):
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def _make_thumb(self, img_id: int) -> "QIcon":
-        from PyQt6.QtGui import QIcon
-        path = IMAGES_DIR / f"{img_id:02d}.png"
-        if path.exists():
-            return QIcon(str(path))
-        bg_hex, symbol, label = STIMULUS_CATALOG[img_id]
-        px = QPixmap(self._THUMB, self._THUMB)
-        px.fill(QColor(bg_hex))
-        painter = QPainter(px)
-        # All catalog entries have symbols — same font/colour for every thumbnail
-        painter.setFont(QFont("Segoe UI Symbol", 36, QFont.Weight.Bold))
-        painter.setPen(QColor(255, 255, 255))
-        painter.drawText(px.rect(), Qt.AlignmentFlag.AlignCenter, symbol)
-        painter.end()
-        return QIcon(px)
+    def _make_thumb(self, img_id: int) -> QIcon:
+        return QIcon(render_stimulus_pixmap(img_id, self._THUMB, with_label=False))
 
     @staticmethod
     def _btn_style(selected: bool) -> str:
@@ -1072,12 +1040,12 @@ class HomeScreen(QWidget):
     sig_enroll     = pyqtSignal()
     sig_monitor    = pyqtSignal()   # open live signal monitor
 
-    _CH_NAMES = ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"]
+    _CH_NAMES = CHANNEL_NAMES
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        bg = ScanlineWidget(self)
-        bg.setGeometry(0, 0, 9999, 9999)
+        self._bg = ScanlineWidget(self)
+        self._bg.setGeometry(0, 0, self.width(), self.height())
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1242,6 +1210,10 @@ class HomeScreen(QWidget):
                 f"color: #000; font-size: 9px; font-weight: bold; border: none;"
             )
 
+    def resizeEvent(self, event):
+        self._bg.setGeometry(0, 0, self.width(), self.height())
+        super().resizeEvent(event)
+
 
 # ── Custom Title Bar ─────────────────────────────────────────────────────────────────────────
 
@@ -1398,6 +1370,7 @@ class MainWindow(QMainWindow):
         self._enrollment_screen.sig_confirmed.connect(self._on_enrollment_done)
         self._signal_monitor_screen.sig_back.connect(self._go_home)
 
+        self._impedance_checker = ImpedanceChecker()
         self._sq_timer = QTimer(self)
         self._sq_timer.timeout.connect(self._update_signal_quality)
         self._sq_timer.start(1500)
@@ -1447,12 +1420,11 @@ class MainWindow(QMainWindow):
 
     def _update_signal_quality(self):
         try:
-            from data_logger import ImpedanceChecker
             snap = self._engine.buffer.snapshot()
-            report = ImpedanceChecker().check(snap)
+            report = self._impedance_checker.check(snap)
             self._home_screen.update_signal_quality(report)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Signal-quality update failed: %s", exc)
 
     @pyqtSlot()
     def _start_authentication(self):
@@ -1493,7 +1465,7 @@ class MainWindow(QMainWindow):
         # Restart signal-quality polling now that the paradigm is done
         self._sq_timer.start(1500)
         # Pass the pipeline so ResultScreen can drive the live ERP plot
-        pipeline = self._worker._pipeline if self._worker else None
+        pipeline = self._worker.pipeline if self._worker else None
         self._result_screen.show_result(result, pipeline=pipeline)
         self._stack.setCurrentIndex(2)
 
@@ -1509,8 +1481,8 @@ class MainWindow(QMainWindow):
 # ── Entry Point ──────────────────────────────────────────────────────────────────────────────
 
 def main():
-    import os
-    os.environ["QT_LOGGING_RULES"] = "*.debug=true"
+    if SOUDE_DEBUG:
+        os.environ["QT_LOGGING_RULES"] = "*.debug=true"
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
@@ -1527,7 +1499,9 @@ def main():
     except Exception:
         pass   # Non-Windows or call not available — acceptable
 
-    app = QApplication(sys.argv)
+    # Reuse the QApplication if a launcher (run.py) already created one —
+    # constructing a second QApplication raises RuntimeError in PyQt6.
+    app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Soude")
     _app_icon = Path(__file__).parent / "assets" / "logo.png"
     if _app_icon.exists():

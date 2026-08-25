@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
 sys.path.insert(0, str(Path(__file__).parent))
 from brain_engine import (
     BrainEngine, MockUnicorn, RealUnicorn,
-    SAMPLE_RATE, N_CHANNELS,
+    SAMPLE_RATE, N_CHANNELS, CHANNEL_NAMES,
 )
 from filters import build_bandpass_sos, apply_filter_chain
 
@@ -56,7 +56,7 @@ class C:
     BORDER   = "#1a2e42"
 
 
-CH_NAMES  = ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"]
+CH_NAMES  = CHANNEL_NAMES
 CH_COLORS = [
     "#00e5ff", "#7c4dff", "#00e676", "#ff5252",
     "#ffab40", "#ea80fc", "#40c4ff", "#b2ff59",

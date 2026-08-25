@@ -10,7 +10,7 @@ from typing import Optional
 
 import numpy as np
 from scipy.signal import sosfiltfilt, sosfilt_zi, sosfilt
-from filters import *
+from filters import build_p300_chain
 
 from brain_engine import (
     SAMPLE_RATE,
@@ -426,4 +426,6 @@ class AuthenticationPipeline:
                               else np.zeros(EPOCH_SAMPLES).tolist()),
             "p300_onset_ms": P300_ONSET_S  * 1000,
             "p300_offset_ms": P300_OFFSET_S * 1000,
+            "n_target":      self._averager.n_target,
+            "n_nontarget":   self._averager.n_nontarget,
         }

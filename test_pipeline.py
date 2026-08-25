@@ -22,14 +22,11 @@ from brain_engine import (
     BrainEngine, MockUnicorn, SAMPLE_RATE, N_CHANNELS,
     P300_CHANNELS, BUFFER_SAMPLES,
 )
+from filters import build_bandpass_sos, build_notch_sos
 from Fase1.signal_processing import (
     AuthenticationPipeline,
     OnlineFilter,
     filter_epoch,
-    baseline_correct,
-    is_artifact,
-    build_bandpass_sos,
-    build_notch_sos,
     EPOCH_SAMPLES,
 )
 from Fase1.stimulus_runner import StimulusRunner, ParadigmConfig

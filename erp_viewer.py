@@ -5,23 +5,25 @@ real time.  Sub-team 2 uses this during signal validation; Sub-team 4 uses
 it in the demo.  Can be embedded or run standalone.
 """
 
+import logging
 import sys
 from typing import Optional
 
 import numpy as np
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot
-from PyQt6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics
+from PyQt6.QtGui import QPainter, QPen, QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QSizePolicy,
+    QLabel, QSizePolicy,
 )
+
+logger = logging.getLogger(__name__)
 
 # ── Colors ─────────────────────────────────────────────────────────────────────
 C_BG        = QColor("#080808")
 C_GRID      = QColor("#242424")
 C_TARGET    = QColor("#b4ff00")   # lime green
 C_NONTARGET = QColor("#cc4444")   # muted red
-C_SHADE     = QColor(180, 255, 0, 28)
 C_P300_ZONE = QColor(180, 255, 0, 14)
 C_TEXT      = QColor("#606060")
 C_AXIS      = QColor("#242424")
@@ -251,10 +253,12 @@ class ERPViewer(QWidget):
         try:
             erp = self._pipeline.get_erp_data()
             self._canvas.update_data(erp)
-            avg = self._pipeline._averager
-            self._n_label.setText(f"T: {avg.n_target} | NT: {avg.n_nontarget}")
+            self._n_label.setText(
+                f"T: {erp.get('n_target', 0)} | NT: {erp.get('n_nontarget', 0)}"
+            )
         except Exception as exc:
-            pass  # Don't crash the UI on display errors
+            # Don't crash the UI on display errors, but leave a trace
+            logger.debug("ERP refresh failed: %s", exc)
 
 
 # ── Standalone demo ────────────────────────────────────────────────────────────

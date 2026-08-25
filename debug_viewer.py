@@ -53,8 +53,8 @@ class C:
     NONTARGET = "#ff5252"
     P300_ZONE = "#00e5ff"
 
-CH_NAMES   = ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"]
-P300_CH    = [2, 4, 6]   # Cz, Pz, Oz
+# Canonical montage from the acquisition core (single source of truth)
+from brain_engine import CHANNEL_NAMES as CH_NAMES, P300_CHANNELS as P300_CH
 CH_COLORS  = ["#00e5ff","#7c4dff","#00e676","#ff5252",
               "#ffab40","#ea80fc","#40c4ff","#b2ff59"]
 SAMPLE_RATE = 250

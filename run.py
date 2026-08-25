@@ -1,15 +1,8 @@
 """
 run.py — Soude launcher
-Crea QApplication ANTES de importar app.py para evitar el error
-'QWidget: Must construct a QApplication before a QWidget'
+Punto de entrada oficial del proyecto:  python run.py
 """
-import sys
-from PyQt6.QtWidgets import QApplication
+from app import main
 
-# QApplication debe existir antes de que cualquier widget se cree.
-# app.py tiene codigo a nivel global que puede tocar Qt al importarse,
-# por eso lo importamos DESPUES de crear QApplication.
-app = QApplication(sys.argv)
-
-from app import main  # noqa: E402  (import intencional despues de QApplication)
-main()
+if __name__ == "__main__":
+    main()

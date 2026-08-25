@@ -8,7 +8,7 @@ import threading
 import time
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 import numpy as np
 import sys
@@ -47,6 +47,10 @@ CH_PO8 = CH_8_PO8
 # Channels used for P300 detection (centroparietal focus)
 P300_CHANNELS = [CH_CZ, CH_PZ, CH_OZ]
 
+# Canonical channel names, index-aligned with the CH_* constants above.
+# Single source of truth — import this instead of re-declaring the list.
+CHANNEL_NAMES = ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"]
+
 # GetData block size: samples pulled per call
 GETDATA_BLOCK = 4          # ~16 ms at 250 Hz — keeps latency low
 
@@ -55,8 +59,6 @@ GETDATA_BLOCK = 4          # ~16 ms at 250 Hz — keeps latency low
 # Reference: g.tec Unicorn Python API, GetNumberOfAcquiredChannels() == 17
 UNICORN_TOTAL_COLS = 17
 
-ruta_unicorn = r"C:\Users\joldo\Documents\gtec\Unicorn Suite\Hybrid Black\Unicorn Python\Lib"
-sys.path.append(ruta_unicorn)
 
 @dataclass
 class StimulusMarker:
@@ -77,8 +79,8 @@ class UnicornInterface(ABC):
     def close(self) -> None: ...
 
     @abstractmethod
-    def get_data(self, n_samples: int) -> np.ndarray: ...
-    """Returns shape (n_samples, N_CHANNELS) in µV."""
+    def get_data(self, n_samples: int) -> np.ndarray:
+        """Returns shape (n_samples, N_CHANNELS) in µV."""
 
 
 # ── Real Device ────────────────────────────────────────────────────────────────
@@ -95,6 +97,11 @@ class RealUnicorn(UnicornInterface):
 
     def open(self) -> None:
         try:
+            # The UnicornPy SDK is not pip-installable: its folder must be on
+            # sys.path.  Configure UNICORN_SDK_PATH in .env (see .env.example).
+            sdk_path = os.environ.get("UNICORN_SDK_PATH", "").strip()
+            if sdk_path and sdk_path not in sys.path:
+                sys.path.append(sdk_path)
             import UnicornPy  # type: ignore
             available = UnicornPy.GetAvailableDevices(True)
             if self.serial not in available:
@@ -106,8 +113,9 @@ class RealUnicorn(UnicornInterface):
             logger.info("Unicorn %s acquisition started.", self.serial)
         except ImportError:
             raise RuntimeError(
-                "UnicornPy is not installed. Run from the Unicorn SDK environment, "
-                "or use MockUnicorn for development."
+                "UnicornPy is not available. Install the g.tec Unicorn Suite and set "
+                "UNICORN_SDK_PATH in your .env to the 'Unicorn Python\\Lib' folder, "
+                "or leave UNICORN_SERIAL empty to use MockUnicorn."
             )
 
     def close(self) -> None:
@@ -161,7 +169,6 @@ class MockUnicorn(UnicornInterface):
         self._rng = np.random.default_rng(seed=42)
         self._pending_p300: list[int] = []   # samples until P300 peak injection
         self._lock = threading.Lock()
-        self._sample_counter = 0
 
     def open(self) -> None:
         logger.info("MockUnicorn opened (simulation mode).")
@@ -180,7 +187,6 @@ class MockUnicorn(UnicornInterface):
         Cz, Pz, Oz.  Sleeps to pace at real hardware sample rate so the ring
         buffer doesn't overflow in test/simulator mode.
         """
-        import time
         # Block for the natural duration of n_samples (mimics hardware behaviour)
         time.sleep(n_samples / SAMPLE_RATE)
         # 1/f noise approximation: white noise low-passed in frequency
@@ -197,9 +203,9 @@ class MockUnicorn(UnicornInterface):
             still_pending = []
             for remaining in self._pending_p300:
                 for s in range(n_samples):
-                    abs_pos = (self._sample_counter + s)
-                    peak_pos = abs_pos + remaining - s  # align relative position
-                    dist = abs(s - (n_samples - remaining))
+                    # `remaining` counts samples from the start of this block
+                    # to the P300 peak, so the peak lands at s == remaining.
+                    dist = abs(s - remaining)
                     if dist < self._P300_WIDTH_SAMPLES:
                         sigma = self._P300_WIDTH_SAMPLES / 2.5
                         amp = self._P300_AMPLITUDE_UV * np.exp(
@@ -212,7 +218,6 @@ class MockUnicorn(UnicornInterface):
                     still_pending.append(new_remaining)
             self._pending_p300 = still_pending
 
-        self._sample_counter += n_samples
         return out
 
 
@@ -274,8 +279,8 @@ class LSLUnicorn(UnicornInterface):
         if self._inlet is not None:
             try:
                 self._inlet.close_stream()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Error closing LSL inlet: %s", exc)
             self._inlet = None
         logger.info("LSLUnicorn: stream closed.")
 
@@ -367,11 +372,10 @@ class RingBuffer:
                     start_index, n_samples, self._total_written
                 )
                 return None
-            out = np.empty((n_samples, N_CHANNELS), dtype=np.float64)
-            for i in range(n_samples):
-                ring_pos = (start_index + i) % BUFFER_SAMPLES
-                out[i] = self._buf[ring_pos]
-            return out
+            # Fancy indexing handles the wrap-around and returns a copy,
+            # keeping time under the lock minimal (no Python-level loop).
+            idx = (start_index + np.arange(n_samples)) % BUFFER_SAMPLES
+            return self._buf[idx]
 
     def snapshot(self) -> np.ndarray:
         """Return a copy of the entire ring buffer in chronological order."""
@@ -470,7 +474,7 @@ class BrainEngine:
                 channel_count=N_CHANNELS,
                 nominal_srate=SAMPLE_RATE,
                 channel_format='float32',
-                source_id=self._device.serial if hasattr(self._device, 'serial') else 'mock_123',
+                source_id=self._device.serial if hasattr(self._device, 'serial') else 'soude_mock',
             )
             outlet = StreamOutlet(info)
             logger.info("LSL broadcast started — other machines can now listen.")

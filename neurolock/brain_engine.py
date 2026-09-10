@@ -188,6 +188,7 @@ class FreeUnicorn(UnicornInterface):
 
     def __init__(self, port: str, baudrate: int = 115200):
         self.port = port
+        self.serial = port
         self.baudrate = baudrate
         self.device: Optional[serial.Serial] = None
 

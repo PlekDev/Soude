@@ -87,36 +87,45 @@ _BAND_SOS = {
 # ─────────────────────────────────────────────────────────────────────────────
 #  Device detection
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+#  Device detection
+# ─────────────────────────────────────────────────────────────────────────────
 def detect_device(forced_serial: str = "") -> tuple:
     """
     Returns (UnicornInterface_instance, label_str, is_real_bool).
-
-    Priority:
-      1. forced_serial argument
-      2. UNICORN_SERIAL environment variable
-      3. First device reported by UnicornPy.GetAvailableDevices()
-      4. MockUnicorn fallback (logs a warning)
     """
-    serial = forced_serial or os.environ.get("UNICORN_SERIAL", "")
-    try:
-        # El SDK no es pip-instalable: añadir UNICORN_SDK_PATH (mismo mecanismo
-        # que RealUnicorn.open) antes de intentar importarlo.
-        sdk_path = os.environ.get("UNICORN_SDK_PATH", "").strip()
-        if sdk_path and sdk_path not in sys.path:
-            sys.path.append(sdk_path)
-        import UnicornPy  # type: ignore   # only present in the g.tec SDK env
-        devices = UnicornPy.GetAvailableDevices(True)
-        logger.info("Unicorn devices detected: %s", devices)
-        if not devices:
-            raise RuntimeError("No Unicorn devices found over Bluetooth.")
-        target = serial if serial in devices else devices[0]
-        return RealUnicorn(target), target, True
-    except ImportError:
-        logger.warning("UnicornPy not installed — using MockUnicorn.")
-    except Exception as exc:
-        logger.warning("Device detection failed (%s) — using MockUnicorn.", exc)
-    return MockUnicorn(), "SIMULATOR", False
+    serial = forced_serial or os.environ.get("UNICORN_SERIAL", "").strip()
+    
+    # 1. ¿Es un stream LSL por red?
+    if serial.upper() == "LSL":
+        from neurolock.brain_engine import LSLUnicorn
+        return LSLUnicorn(), "LSL NETWORK", True
 
+    # 2. ¿Es una conexión serial directa (FreeUnicorn)?
+    if serial.upper().startswith("COM") or serial.startswith("/dev/"):
+        from neurolock.brain_engine import FreeUnicorn
+        return FreeUnicorn(port=serial), serial, True
+
+    # 3. ¿Es el SDK oficial de g.tec (RealUnicorn)?
+    if serial:
+        try:
+            sdk_path = os.environ.get("UNICORN_SDK_PATH", "").strip()
+            if sdk_path and sdk_path not in sys.path:
+                sys.path.append(sdk_path)
+            import UnicornPy  # type: ignore
+            devices = UnicornPy.GetAvailableDevices(True)
+            logger.info("Unicorn devices detected: %s", devices)
+            if not devices:
+                raise RuntimeError("No Unicorn devices found over Bluetooth.")
+            target = serial if serial in devices else devices[0]
+            return RealUnicorn(target), target, True
+        except ImportError:
+            logger.warning("UnicornPy no instalado — SDK fallido.")
+        except Exception as exc:
+            logger.warning("Fallo detectando dispositivo (%s).", exc)
+
+    # 4. Fallback al simulador
+    return MockUnicorn(), "SIMULATOR", False
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Reusable style helpers

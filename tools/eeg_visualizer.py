@@ -212,7 +212,7 @@ class WaveformWidget(QWidget):
             n     = self._n_samples
             if total < n:
                 return
-            data = buf.read_from(total - n, n)
+            data = buf.read_eeg_from(total - n, n)
             if data is not None:
                 self._data = data
                 self.update()   # schedule repaint
@@ -532,7 +532,7 @@ class SidebarWidget(QWidget):
                 return
 
             # ── Signal quality (last 1 s, all channels) ──────────────────────
-            q_data = buf.read_from(total - self._RMS_WINDOW, self._RMS_WINDOW)
+            q_data = buf.read_eeg_from(total - self._RMS_WINDOW, self._RMS_WINDOW)
             if q_data is not None:
                 # Centrar por canal: el offset DC del hardware real (~200 kµV)
                 # saturaría el RMS y todas las barras de calidad.
@@ -560,7 +560,7 @@ class SidebarWidget(QWidget):
                     """)
 
             # ── Band power (last 2 s, Cz channel) ────────────────────────────
-            bp_data = buf.read_from(total - self._BP_WINDOW, self._BP_WINDOW)
+            bp_data = buf.read_eeg_from(total - self._BP_WINDOW, self._BP_WINDOW)
             if bp_data is not None:
                 cz = bp_data[:, 2]
                 cz_sig = (cz - float(cz.mean())).reshape(-1, 1)  # (n, 1), sin DC

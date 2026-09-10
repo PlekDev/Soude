@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 
 from neurolock.brain_engine import (
-    BrainEngine, MockUnicorn, RingBuffer, StimulusMarker,
+    BrainEngine, MockUnicorn, RingBuffer, StimulusMarker, UnicornDataPacket,
     SAMPLE_RATE, N_CHANNELS, P300_CHANNELS, BUFFER_SAMPLES,
 )
 from neurolock.filters import build_bandpass_sos, build_notch_sos
@@ -58,19 +58,34 @@ def test_ring_buffer():
     section("1 - Ring Buffer")
 
     rb = RingBuffer()
-    chunk = np.random.randn(100, N_CHANNELS)
-    rb.write(chunk)
+    
+    # Crear un paquete de prueba estructurado
+    chunk_eeg = np.random.randn(100, N_CHANNELS)
+    packet = UnicornDataPacket(
+        eeg=chunk_eeg,
+        accelerometer=np.zeros((100, 3)),
+        gyroscope=np.zeros((100, 3)),
+        battery=np.full(100, 100.0)
+    )
+    
+    rb.write_packet(packet)
     assert rb.total_written == 100
-    ok("write 100 samples, total_written == 100")
+    ok("write_packet 100 samples, total_written == 100")
 
     readback = rb.read_from(0, 100)
     assert readback is not None
-    assert np.allclose(readback, chunk)
+    assert np.allclose(readback.eeg, chunk_eeg)
     ok("read_from(0,100) matches written data")
 
     # Write enough to wrap
-    big = np.random.randn(BUFFER_SAMPLES, N_CHANNELS)
-    rb.write(big)
+    big_eeg = np.random.randn(BUFFER_SAMPLES, N_CHANNELS)
+    big_packet = UnicornDataPacket(
+        eeg=big_eeg,
+        accelerometer=np.zeros((BUFFER_SAMPLES, 3)),
+        gyroscope=np.zeros((BUFFER_SAMPLES, 3)),
+        battery=np.full(BUFFER_SAMPLES, 100.0)
+    )
+    rb.write_packet(big_packet)
     assert rb.total_written == 100 + BUFFER_SAMPLES
     ok("wrap-around write succeeds")
 
@@ -117,12 +132,12 @@ def test_mock_unicorn_p300():
     mock = MockUnicorn()
     mock.open()
 
-    baseline = mock.get_data(SAMPLE_RATE)
-    baseline_mean = float(np.mean(baseline[:, P300_CHANNELS[0]]))
+    baseline_packet = mock.get_data(SAMPLE_RATE)
+    baseline_mean = float(np.mean(baseline_packet.eeg[:, P300_CHANNELS[0]]))
 
     mock.notify_target()
-    injected = mock.get_data(SAMPLE_RATE)
-    peak = float(np.max(injected[:, P300_CHANNELS[0]]))
+    injected_packet = mock.get_data(SAMPLE_RATE)
+    peak = float(np.max(injected_packet.eeg[:, P300_CHANNELS[0]]))
 
     assert peak > baseline_mean + 2.0, (
         f"Expected P300 peak > baseline+2uV, got peak={peak:.2f}, base={baseline_mean:.2f}"

@@ -1,0 +1,9 @@
+PUNTO DE OPERACIÓN ACTUAL (umbral fijo del sistema)
+Sesiones genuine:  25 (granted=10, denied=15)
+Sesiones impostor: 25 (granted=1, denied=24)
+FAR: 4.00%
+FRR: 60.00%
+Accuracy: 68.00%
+
+EER (barriendo umbral sobre delta_uv): 36.00% @ threshold=0.275 µV
+AUC: 0.7128

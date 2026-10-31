@@ -6,6 +6,7 @@ Sub-team 1 (Hardware/API) owns this file.
 
 import threading
 import time
+import struct
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -14,13 +15,14 @@ import numpy as np
 import sys
 import os
 from pylsl import StreamInfo, StreamOutlet
+import serial
 
 logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 SAMPLE_RATE = 250          # Unicorn Hybrid Black native sample rate (Hz)
 N_CHANNELS = 8             # EEG channels (Fz, C3, Cz, C4, Pz, PO7, Oz, PO8)
-BUFFER_SECONDS = 120       # Ring buffer duration — must exceed full paradigm (~57 s) + enrollment time + margin
+BUFFER_SECONDS = 120       # Ring buffer duration
 BUFFER_SAMPLES = SAMPLE_RATE * BUFFER_SECONDS
 
 # Channel indices (0-based) matching Unicorn Hybrid Black layout
@@ -33,8 +35,7 @@ CH_6_PO7 = 5
 CH_7_OZ  = 6
 CH_8_PO8 = 7
 
-# Alias para mantener la compatibilidad con el resto del proyecto 
-# (Así no tienes que cambiar los otros archivos)
+# Alias de compatibilidad
 CH_FZ  = CH_1_FZ
 CH_C3  = CH_2_C3
 CH_CZ  = CH_3_CZ
@@ -44,20 +45,55 @@ CH_PO7 = CH_6_PO7
 CH_OZ  = CH_7_OZ
 CH_PO8 = CH_8_PO8
 
-# Channels used for P300 detection (centroparietal focus)
 P300_CHANNELS = [CH_CZ, CH_PZ, CH_OZ]
-
-# Canonical channel names, index-aligned with the CH_* constants above.
-# Single source of truth — import this instead of re-declaring the list.
 CHANNEL_NAMES = ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"]
 
-# GetData block size: samples pulled per call
-GETDATA_BLOCK = 4          # ~16 ms at 250 Hz — keeps latency low
+GETDATA_BLOCK = 4          # samples pulled per call (~16 ms at 250 Hz)
 
-# Total data columns returned by UnicornPy.GetData() per sample (Unicorn Hybrid Black)
-# Layout: 8 EEG | 3 Accelerometer | 3 Gyroscope | 1 Battery | 1 Counter | 1 Validation
-# Reference: g.tec Unicorn Python API, GetNumberOfAcquiredChannels() == 17
+# Unicorn Hybrid Black native stream layout (17 cols):
+# 0..7: EEG (8) | 8..10: Accel (3) | 11..13: Gyro (3) | 14: Battery (1) | 15: Counter (1) | 16: Validation (1)
 UNICORN_TOTAL_COLS = 17
+
+# LSL stream layout for all kinematic + physiological data (15 channels):
+LSL_TOTAL_COLS = 15  # 8 EEG + 3 Accel + 3 Gyro + 1 Battery
+
+
+# ── Estructuras de Datos Estandarizadas ────────────────────────────────────────
+
+@dataclass
+class UnicornDataPacket:
+    """
+    Estructura estándar que encapsula un bloque de adquisición de n_samples.
+    
+    Attributes:
+        eeg:           Array (n_samples, 8) en µV.
+        accelerometer: Array (n_samples, 3) en g (X, Y, Z).
+        gyroscope:     Array (n_samples, 3) en deg/s (X, Y, Z).
+        battery:       Array (n_samples,) porcentaje [0.0, 100.0].
+    """
+    eeg: np.ndarray
+    accelerometer: np.ndarray
+    gyroscope: np.ndarray
+    battery: np.ndarray
+
+    def to_matrix(self) -> np.ndarray:
+        """Serializa a array 2D shape (n_samples, 15) para red (LSL) o almacenamiento plano."""
+        return np.column_stack([
+            self.eeg,
+            self.accelerometer,
+            self.gyroscope,
+            self.battery[:, np.newaxis]
+        ])
+
+    @classmethod
+    def from_matrix(cls, matrix: np.ndarray) -> "UnicornDataPacket":
+        """Reconstruye un UnicornDataPacket a partir de un array 2D de 15 columnas."""
+        return cls(
+            eeg=matrix[:, :8],
+            accelerometer=matrix[:, 8:11],
+            gyroscope=matrix[:, 11:14],
+            battery=matrix[:, 14],
+        )
 
 
 @dataclass
@@ -66,11 +102,11 @@ class StimulusMarker:
     image_id: int
     buffer_index: int          # Write-head position in ring buffer at flash time
     timestamp: float           # time.perf_counter() value for external alignment
-    is_target: bool = False    # Set later during authentication evaluation
+    is_target: bool = False
 
 
 class UnicornInterface(ABC):
-    """Abstract base so MockUnicorn and RealUnicorn share the same contract."""
+    """Abstract base so MockUnicorn, RealUnicorn, and LSLUnicorn share the same contract."""
 
     @abstractmethod
     def open(self) -> None: ...
@@ -79,17 +115,13 @@ class UnicornInterface(ABC):
     def close(self) -> None: ...
 
     @abstractmethod
-    def get_data(self, n_samples: int) -> np.ndarray:
-        """Returns shape (n_samples, N_CHANNELS) in µV."""
+    def get_data(self, n_samples: int) -> UnicornDataPacket:
+        """Returns normalized UnicornDataPacket containing EEG, kinematics, and battery."""
 
 
-# ── Real Device ────────────────────────────────────────────────────────────────
+# ── Real Device With API ────────────────────────────────────────────────────────────────
 class RealUnicorn(UnicornInterface):
-    """
-    Thin wrapper around UnicornPy that enforces the UnicornInterface contract.
-    Import UnicornPy lazily so the rest of the codebase loads on machines
-    that only have MockUnicorn available.
-    """
+    """Wrapper around UnicornPy mapping the raw 17 columns to UnicornDataPacket."""
 
     def __init__(self, serial: str):
         self.serial = serial
@@ -97,8 +129,6 @@ class RealUnicorn(UnicornInterface):
 
     def open(self) -> None:
         try:
-            # The UnicornPy SDK is not pip-installable: its folder must be on
-            # sys.path.  Configure UNICORN_SDK_PATH in .env (see .env.example).
             sdk_path = os.environ.get("UNICORN_SDK_PATH", "").strip()
             if sdk_path and sdk_path not in sys.path:
                 sys.path.append(sdk_path)
@@ -109,13 +139,12 @@ class RealUnicorn(UnicornInterface):
                     f"Device {self.serial} not found. Available: {available}"
                 )
             self._device = UnicornPy.Unicorn(self.serial)
-            self._device.StartAcquisition(False)   # False = signal mode (not test)
+            self._device.StartAcquisition(False)
             logger.info("Unicorn %s acquisition started.", self.serial)
         except ImportError:
             raise RuntimeError(
                 "UnicornPy is not available. Install the g.tec Unicorn Suite and set "
-                "UNICORN_SDK_PATH in your .env to the 'Unicorn Python\\Lib' folder, "
-                "or leave UNICORN_SERIAL empty to use MockUnicorn."
+                "UNICORN_SDK_PATH in your .env, or leave UNICORN_SERIAL empty to use MockUnicorn."
             )
 
     def close(self) -> None:
@@ -129,51 +158,165 @@ class RealUnicorn(UnicornInterface):
                 self._device = None
                 logger.info("Unicorn device released.")
 
-    def get_data(self, n_samples: int) -> np.ndarray:
-        """
-        Pull n_samples from the device.  UnicornPy.GetData fills a flat buffer
-        ordered as [ch0_s0, ch1_s0, …, ch7_s0, ch0_s1, …].
-        Returns (n_samples, N_CHANNELS) float64 array in µV.
-        """
+    def get_data(self, n_samples: int) -> UnicornDataPacket:
         import UnicornPy  # type: ignore
-        # Unicorn SDK requires a buffer sized: total_cols * samples * sizeof(float32)
-        # UNICORN_TOTAL_COLS = 17: 8 EEG + 3 Accel + 3 Gyro + 1 Battery + 1 Counter + 1 Valid
-        n_cols = UNICORN_TOTAL_COLS
-        raw = bytearray(n_samples * n_cols * 4)
+        raw = bytearray(n_samples * UNICORN_TOTAL_COLS * 4)
         try:
-            data = self._device.GetData(n_samples, raw, len(raw))
+            self._device.GetData(n_samples, raw, len(raw))
         except UnicornPy.DeviceException as exc:
             raise RuntimeError(f"Unicorn GetData failed: {exc}") from exc
 
-        arr = np.frombuffer(raw, dtype=np.float32).reshape(n_samples, n_cols)
-        return arr[:, :N_CHANNELS].astype(np.float64)   # drop non-EEG columns
+        arr = np.frombuffer(raw, dtype=np.float32).reshape(n_samples, UNICORN_TOTAL_COLS)
+        
+        return UnicornDataPacket(
+            eeg=arr[:, 0:8].astype(np.float64),
+            accelerometer=arr[:, 8:11].astype(np.float64),
+            gyroscope=arr[:, 11:14].astype(np.float64),
+            battery=arr[:, 14].astype(np.float64),
+        )
 
+# ── Real Device With FREEAPI (Direct Serial) ──────────────────────────────────
+class FreeUnicorn(UnicornInterface):
+    """
+    Controlador directo vía puerto serie (UART/Bluetooth) sin dependencia de UnicornPy.
+    Parsea tramas binarias de 45 bytes (1 muestra por trama a 250 Hz).
+    """
+
+    START_ACQ = bytes([0x61, 0x7C, 0x87])
+    STOP_ACQ  = bytes([0x63, 0x5C, 0xC5])
+    FRAME_LEN = 45
+
+    def __init__(self, port: str, baudrate: int = 115200):
+        self.port = port
+        self.serial = port
+        self.baudrate = baudrate
+        self.device: Optional[serial.Serial] = None
+
+    def open(self) -> None:
+        try:
+            self.device = serial.Serial(
+                port=self.port,
+                baudrate=self.baudrate,
+                timeout=2.0
+            )
+            self.device.reset_input_buffer()
+            self.device.reset_output_buffer()
+
+            # Comando de inicio de adquisición
+            self.device.write(self.START_ACQ)
+            response = self.device.read(3)
+
+            if response != b'\x00\x00\x00':
+                logger.warning(
+                    "FreeUnicorn (%s): Respuesta de inicio no estándar: %s",
+                    self.port, response.hex()
+                )
+            logger.info("FreeUnicorn en %s iniciado correctamente.", self.port)
+        except Exception as exc:
+            if self.device and self.device.is_open:
+                self.device.close()
+            self.device = None
+            raise RuntimeError(f"Error al abrir Unicorn en puerto serie {self.port}: {exc}") from exc
+
+    def close(self) -> None:
+        if self.device is not None:
+            try:
+                if self.device.is_open:
+                    self.device.write(self.STOP_ACQ)
+                    time.sleep(0.05)
+                    self.device.close()
+                logger.info("FreeUnicorn (%s) cerrado.", self.port)
+            except Exception as exc:
+                logger.warning("Error cerrando FreeUnicorn: %s", exc)
+            finally:
+                self.device = None
+
+    def _read_exact(self, n_bytes: int) -> bytes:
+        """Lee exactamente n_bytes bloqueando hasta completarlos o dar timeout."""
+        data = bytearray()
+        while len(data) < n_bytes:
+            chunk = self.device.read(n_bytes - len(data))
+            if not chunk:
+                raise TimeoutError("Timeout en lectura serie de FreeUnicorn.")
+            data.extend(chunk)
+        return bytes(data)
+
+    def _read_frame(self) -> bytes:
+        """Sincroniza y extrae una trama válida de 45 bytes (0xC0 0x00 ... 0x0D 0x0A)."""
+        while True:
+            # Buscar byte de cabecera 0xC0
+            b = self.device.read(1)
+            if not b:
+                raise TimeoutError("Timeout buscando cabecera de trama Unicorn.")
+            if b == b'\xC0':
+                b2 = self.device.read(1)
+                if b2 == b'\x00':
+                    # Cabecera confirmada; leer los 43 bytes restantes del payload
+                    rest = self._read_exact(self.FRAME_LEN - 2)
+                    payload = b'\xC0\x00' + rest
+                    # Verificar pie de paquete (0x0D 0x0A -> CR LF)
+                    if payload[43:45] == b'\x0D\x0A':
+                        return payload
+                    # Si el footer no coincide, se perdió sincronización; continúa el escaneo
+
+    def get_data(self, n_samples: int) -> UnicornDataPacket:
+        if self.device is None or not self.device.is_open:
+            raise RuntimeError("Dispositivo FreeUnicorn no está abierto.")
+
+        eeg_arr   = np.zeros((n_samples, 8), dtype=np.float64)
+        accel_arr = np.zeros((n_samples, 3), dtype=np.float64)
+        gyro_arr  = np.zeros((n_samples, 3), dtype=np.float64)
+        batt_arr  = np.zeros(n_samples, dtype=np.float64)
+
+        for s in range(n_samples):
+            payload = self._read_frame()
+
+            # Batería (nibble bajo de byte 2, rango 0..15 -> 0..100%)
+            batt_arr[s] = 100.0 * float(payload[2] & 0x0F) / 15.0
+
+            # 8 Canales EEG (3 bytes cada uno en Big-Endian con signo)
+            for ch in range(8):
+                idx = 3 + ch * 3
+                raw_bytes = b'\x00' + payload[idx:idx + 3]
+                val = struct.unpack('>i', raw_bytes)[0]
+                if val & 0x00800000:
+                    val -= 0x01000000
+                # Conversión de cuentas del ADC a µV
+                eeg_arr[s, ch] = float(val) * 4500000.0 / 50331642.0
+
+            # Acelerómetro (Little-Endian, 16-bit signed, escala ±8g -> 4096 LSB/g)
+            accel_arr[s, 0] = float(struct.unpack('<h', payload[27:29])[0]) / 4096.0
+            accel_arr[s, 1] = float(struct.unpack('<h', payload[29:31])[0]) / 4096.0
+            accel_arr[s, 2] = float(struct.unpack('<h', payload[31:33])[0]) / 4096.0
+
+            # Giroscopio (Little-Endian, 16-bit signed, escala ±1000 deg/s -> 32.8 LSB/(deg/s))
+            gyro_arr[s, 0] = float(struct.unpack('<h', payload[33:35])[0]) / 32.8
+            gyro_arr[s, 1] = float(struct.unpack('<h', payload[35:37])[0]) / 32.8
+            gyro_arr[s, 2] = float(struct.unpack('<h', payload[37:39])[0]) / 32.8
+
+        return UnicornDataPacket(
+            eeg=eeg_arr,
+            accelerometer=accel_arr,
+            gyroscope=gyro_arr,
+            battery=batt_arr,
+        )
 
 # ── Mock Device ────────────────────────────────────────────────────────────────
 class MockUnicorn(UnicornInterface):
-    """
-    Generates synthetic EEG.  When notify_target() is called it injects a
-    realistic P300-shaped response (positive peak ~300 ms post-stimulus) on
-    P300_CHANNELS so the signal processing pipeline can be validated without
-    hardware.
+    """Generates synthetic EEG + kinematics + battery with P300 injection capabilities."""
 
-    Usage:
-        engine = BrainEngine(device=MockUnicorn())
-    """
-
-    _P300_LATENCY_SAMPLES = int(0.30 * SAMPLE_RATE)   # 300 ms
-    _P300_WIDTH_SAMPLES   = int(0.10 * SAMPLE_RATE)   # ~100 ms FWHM
-    _P300_AMPLITUDE_UV    = 8.0                        # µV peak (realistic default)
+    _P300_LATENCY_SAMPLES = int(0.30 * SAMPLE_RATE)
+    _P300_WIDTH_SAMPLES   = int(0.10 * SAMPLE_RATE)
+    _P300_AMPLITUDE_UV    = 8.0
 
     def __init__(self, p300_amplitude_uv: float = _P300_AMPLITUDE_UV):
-        # p300_amplitude_uv: tests may raise this so the injected P300 clears
-        # the pink-noise floor deterministically; 8 µV is the realistic default.
         self._amplitude = p300_amplitude_uv
         self._rng = np.random.default_rng(seed=42)
-        self._pending_p300: list[int] = []   # samples until P300 peak injection
+        self._pending_p300: list[int] = []
         self._lock = threading.Lock()
-        self._t0: Optional[float] = None     # pacing reference (drift-free)
-        self._served = 0                     # total samples served
+        self._t0: Optional[float] = None
+        self._served = 0
+        self._simulated_battery = 95.0
 
     def open(self) -> None:
         logger.info("MockUnicorn opened (simulation mode).")
@@ -182,85 +325,71 @@ class MockUnicorn(UnicornInterface):
         logger.info("MockUnicorn closed.")
 
     def notify_target(self) -> None:
-        """Call this from BrainEngine.mark_stimulus when image is a target."""
         with self._lock:
             self._pending_p300.append(self._P300_LATENCY_SAMPLES)
 
-    def get_data(self, n_samples: int) -> np.ndarray:
-        """
-        Produce pink-ish noise baseline with optional P300 bump injected on
-        Cz, Pz, Oz.  Sleeps to pace at real hardware sample rate so the ring
-        buffer doesn't overflow in test/simulator mode.
-        """
-        # Pace against an absolute schedule (not a per-call sleep) so overhead
-        # doesn't accumulate drift between wall clock and samples served.
+    def get_data(self, n_samples: int) -> UnicornDataPacket:
         if self._t0 is None:
             self._t0 = time.monotonic()
         self._served += n_samples
         delay = self._t0 + self._served / SAMPLE_RATE - time.monotonic()
         if delay > 0:
             time.sleep(delay)
-        # 1/f noise approximation: white noise low-passed in frequency
+
+        # 1/f Pink-noise baseline for EEG
         white = self._rng.standard_normal((n_samples, N_CHANNELS)) * 6.0
-        # Simple IIR to tint toward pink (b=1, a=[1, -0.98])
-        out = np.zeros_like(white)
+        eeg_out = np.zeros_like(white)
         prev = np.zeros(N_CHANNELS)
         for i in range(n_samples):
-            out[i] = white[i] + 0.98 * prev
-            prev = out[i]
+            eeg_out[i] = white[i] + 0.98 * prev
+            prev = eeg_out[i]
 
         # Inject P300 for pending targets
         with self._lock:
             still_pending = []
             for remaining in self._pending_p300:
                 for s in range(n_samples):
-                    # `remaining` counts samples from the start of this block
-                    # to the P300 peak, so the peak lands at s == remaining.
                     dist = abs(s - remaining)
                     if dist < self._P300_WIDTH_SAMPLES:
                         sigma = self._P300_WIDTH_SAMPLES / 2.5
-                        amp = self._amplitude * np.exp(
-                            -0.5 * (dist / sigma) ** 2
-                        )
+                        amp = self._amplitude * np.exp(-0.5 * (dist / sigma) ** 2)
                         for ch in P300_CHANNELS:
-                            out[s, ch] += amp
+                            eeg_out[s, ch] += amp
                 new_remaining = remaining - n_samples
                 if new_remaining > -self._P300_WIDTH_SAMPLES:
                     still_pending.append(new_remaining)
             self._pending_p300 = still_pending
 
-        return out
+        # Synthetic Accelerometer (gravity on Z ~1.0g + small tremor)
+        accel = np.zeros((n_samples, 3), dtype=np.float64)
+        accel[:, 2] = 1.0
+        accel += self._rng.normal(0.0, 0.02, size=(n_samples, 3))
 
+        # Synthetic Gyroscope (rest state ~0 deg/s + micro-movements)
+        gyro = self._rng.normal(0.0, 0.1, size=(n_samples, 3))
+
+        # Synthetic Battery (slow drain)
+        self._simulated_battery = max(0.0, self._simulated_battery - 0.0001 * n_samples)
+        battery = np.full(n_samples, self._simulated_battery, dtype=np.float64)
+
+        return UnicornDataPacket(
+            eeg=eeg_out,
+            accelerometer=accel,
+            gyroscope=gyro,
+            battery=battery,
+        )
 
 # ── LSL Network Receiver ──────────────────────────────────────────────────────
 class LSLUnicorn(UnicornInterface):
-    """
-    Receives EEG from an LSL stream broadcast by tools/lsl_sender.py (or by another
-    BrainEngine instance running on the LAN).  Implements the same
-    UnicornInterface contract as RealUnicorn so the rest of the application
-    — stimulus display, authentication pipeline, session logging — works
-    completely unchanged on the receiving machine.
-
-    Usage:
-        Set  UNICORN_SERIAL=LSL  in your .env file on the receiver machine.
-        BrainEngine will automatically pick this class.
-
-    Network setup:
-        Sender  : run the main app (or tools/lsl_sender.py) on the machine that has
-                  the Unicorn dongle/licence.  The LSL stream "Unicorn_EEG"
-                  is broadcast automatically.
-        Receiver: set UNICORN_SERIAL=LSL and run the main app normally.
-                  Both machines must be on the same WiFi / LAN segment.
-    """
+    """Receives normalized streams (15 channels) over LSL."""
 
     LSL_STREAM_NAME  = "Unicorn_EEG"
-    RESOLVE_TIMEOUT  = 15.0    # seconds to scan the network for the stream
-    PULL_TIMEOUT     = 0.05    # seconds per pull_chunk call inside get_data()
-    GET_DATA_TIMEOUT = 5.0     # hard deadline per get_data() call
+    RESOLVE_TIMEOUT  = 15.0
+    PULL_TIMEOUT     = 0.05
+    GET_DATA_TIMEOUT = 5.0
 
     def __init__(self):
         self._inlet = None
-        # Internal FIFO: accumulates samples that arrived between get_data() calls
         self._pending: list[list[float]] = []
         self._lock = threading.Lock()
 
@@ -275,15 +404,13 @@ class LSLUnicorn(UnicornInterface):
         )
         if not streams:
             raise RuntimeError(
-                f"No LSL stream named '{self.LSL_STREAM_NAME}' found on the network.\n"
-                "Make sure tools/lsl_sender.py (or the main app) is running on the sender machine "
-                "and both computers are on the same WiFi / LAN segment."
+                f"No LSL stream named '{self.LSL_STREAM_NAME}' found on the network."
             )
         self._inlet = StreamInlet(streams[0])
         info = self._inlet.info()
         logger.info(
-            "LSLUnicorn connected to '%s'  channels=%d  srate=%.0f Hz  source='%s'",
-            info.name(), info.channel_count(), info.nominal_srate(), info.source_id(),
+            "LSLUnicorn connected: name='%s' channels=%d rate=%.0f Hz",
+            info.name(), info.channel_count(), info.nominal_srate(),
         )
 
     def close(self) -> None:
@@ -295,20 +422,14 @@ class LSLUnicorn(UnicornInterface):
             self._inlet = None
         logger.info("LSLUnicorn: stream closed.")
 
-    def get_data(self, n_samples: int) -> np.ndarray:
-        """
-        Block until exactly n_samples are available from the LSL stream.
-        Returns (n_samples, N_CHANNELS) float64 array — same shape as
-        RealUnicorn.get_data() so the acquisition loop is unaffected.
-        """
+    def get_data(self, n_samples: int) -> UnicornDataPacket:
         deadline = time.monotonic() + self.GET_DATA_TIMEOUT
         with self._lock:
             while len(self._pending) < n_samples:
                 if time.monotonic() > deadline:
                     raise RuntimeError(
                         f"LSLUnicorn timeout: waited {self.GET_DATA_TIMEOUT}s for "
-                        f"{n_samples} samples (only {len(self._pending)} arrived). "
-                        "Check that the sender is still running."
+                        f"{n_samples} samples. Check sender status."
                     )
                 chunk, _ = self._inlet.pull_chunk(
                     max_samples=n_samples - len(self._pending),
@@ -316,21 +437,31 @@ class LSLUnicorn(UnicornInterface):
                 )
                 if chunk:
                     self._pending.extend(chunk)
+
             out = np.array(self._pending[:n_samples], dtype=np.float64)
             self._pending = self._pending[n_samples:]
-        return out
 
+        # Si el stream LSL tiene 15 canales, parseamos el paquete completo
+        if out.shape[1] >= LSL_TOTAL_COLS:
+            return UnicornDataPacket.from_matrix(out[:, :LSL_TOTAL_COLS])
+        else:
+            # Compatibilidad fallback: si un emisor legacy solo manda 8 canales EEG
+            return UnicornDataPacket(
+                eeg=out[:, :N_CHANNELS],
+                accelerometer=np.zeros((n_samples, 3), dtype=np.float64),
+                gyroscope=np.zeros((n_samples, 3), dtype=np.float64),
+                battery=np.zeros(n_samples, dtype=np.float64),
+            )
 
 # ── Ring Buffer ────────────────────────────────────────────────────────────────
 class RingBuffer:
     """
-    Thread-safe circular buffer for continuous EEG storage.
-    Shape: (BUFFER_SAMPLES, N_CHANNELS).
-    write_head points to the NEXT slot to be written.
+    Thread-safe circular buffer for continuous EEG + auxiliary data.
+    Stores all 15 dimensions: shape (BUFFER_SAMPLES, 15).
     """
 
     def __init__(self):
-        self._buf = np.zeros((BUFFER_SAMPLES, N_CHANNELS), dtype=np.float64)
+        self._buf = np.zeros((BUFFER_SAMPLES, LSL_TOTAL_COLS), dtype=np.float64)
         self._write_head = 0
         self._total_written = 0
         self._lock = threading.RLock()
@@ -343,72 +474,45 @@ class RingBuffer:
     def total_written(self) -> int:
         return self._total_written
 
-    def write(self, samples: np.ndarray) -> None:
-        """
-        Write (n, N_CHANNELS) samples.  Wraps around automatically.
-        """
-        n = len(samples)
+    def write_packet(self, packet: UnicornDataPacket) -> None:
+        """Escribe un UnicornDataPacket serializándolo internamente."""
+        matrix = packet.to_matrix()
+        n = len(matrix)
         with self._lock:
             end = self._write_head + n
             if end <= BUFFER_SAMPLES:
-                self._buf[self._write_head:end] = samples
+                self._buf[self._write_head:end] = matrix
             else:
                 first = BUFFER_SAMPLES - self._write_head
-                self._buf[self._write_head:] = samples[:first]
-                self._buf[:n - first] = samples[first:]
+                self._buf[self._write_head:] = matrix[:first]
+                self._buf[:n - first] = matrix[first:]
             self._write_head = end % BUFFER_SAMPLES
             self._total_written += n
 
-    def read_from(self, start_index: int, n_samples: int) -> Optional[np.ndarray]:
-        """
-        Return n_samples starting from start_index (ring-wrapped).
-        Returns None if start_index is older than BUFFER_SAMPLES ago.
-        """
+    def read_from(self, start_index: int, n_samples: int) -> Optional[UnicornDataPacket]:
+        """Extrae n_samples en un UnicornDataPacket estructurado."""
         with self._lock:
-            # When buffer hasn't filled once yet, oldest valid index is 0
-            if self._total_written <= BUFFER_SAMPLES:
-                oldest = 0
-            else:
-                oldest = self._total_written - BUFFER_SAMPLES
-
-            if start_index < oldest:
-                logger.warning(
-                    "Requested index %d is before oldest buffered sample %d.",
-                    start_index, oldest
-                )
+            oldest = 0 if self._total_written <= BUFFER_SAMPLES else self._total_written - BUFFER_SAMPLES
+            if start_index < oldest or start_index + n_samples > self._total_written:
                 return None
-            if start_index + n_samples > self._total_written:
-                logger.debug(
-                    "Requested index %d + %d samples not yet acquired (have %d).",
-                    start_index, n_samples, self._total_written
-                )
-                return None
-            # Fancy indexing handles the wrap-around and returns a copy,
-            # keeping time under the lock minimal (no Python-level loop).
             idx = (start_index + np.arange(n_samples)) % BUFFER_SAMPLES
-            return self._buf[idx]
+            chunk = self._buf[idx]
+            return UnicornDataPacket.from_matrix(chunk)
 
-    def snapshot(self) -> np.ndarray:
-        """Return a copy of the entire ring buffer in chronological order."""
+    def read_eeg_from(self, start_index: int, n_samples: int) -> Optional[np.ndarray]:
+        """Atajo para algoritmos que sólo necesitan los canales EEG (n_samples, 8)."""
+        packet = self.read_from(start_index, n_samples)
+        return packet.eeg if packet is not None else None
+
+    def snapshot(self) -> UnicornDataPacket:
+        """Copia ordenada cronológicamente de todo el búfer."""
         with self._lock:
-            return np.roll(self._buf.copy(), -self._write_head, axis=0)
-
+            rolled = np.roll(self._buf.copy(), -self._write_head, axis=0)
+            return UnicornDataPacket.from_matrix(rolled)
 
 # ── Brain Engine ───────────────────────────────────────────────────────────────
 class BrainEngine:
-    """
-    High-level controller.  Spawns a high-priority acquisition thread,
-    manages the ring buffer, and records stimulus markers.
-
-    Example:
-        engine = BrainEngine(serial="UN-2023.10.01")
-        engine.start()
-        ...
-        engine.mark_stimulus(image_id=7)
-        ...
-        markers = engine.get_markers()
-        engine.stop()
-    """
+    """High-level controller."""
 
     def __init__(
         self,
@@ -420,7 +524,11 @@ class BrainEngine:
         elif serial is not None and serial.upper() == "LSL":
             logger.info("UNICORN_SERIAL=LSL — using LSLUnicorn (network receiver mode).")
             self._device = LSLUnicorn()
+        elif serial is not None and (serial.upper().startswith("COM") or serial.startswith("/dev/")):
+            logger.info("Puerto serial detectado (%s) — using FreeUnicorn (Direct Serial).", serial)
+            self._device = FreeUnicorn(port=serial)
         elif serial is not None:
+            logger.info("Serial de hardware detectado (%s) — using RealUnicorn (UnicornPy).", serial)
             self._device = RealUnicorn(serial)
         else:
             logger.info("No serial or device provided — using MockUnicorn.")
@@ -434,10 +542,7 @@ class BrainEngine:
         self._thread: Optional[threading.Thread] = None
         self._acq_error: Optional[Exception] = None
 
-    # ── Lifecycle ──────────────────────────────────────────────────────────────
-
     def start(self) -> None:
-        """Open device and start background acquisition thread."""
         self._device.open()
         self._running = True
         self._thread = threading.Thread(
@@ -446,18 +551,16 @@ class BrainEngine:
             daemon=True,
         )
         self._thread.start()
-        # Elevate OS thread priority on Windows
         try:
             import ctypes
             handle = ctypes.windll.kernel32.OpenThread(0x0020, False, self._thread.ident)
-            ctypes.windll.kernel32.SetThreadPriority(handle, 2)  # THREAD_PRIORITY_HIGHEST
+            ctypes.windll.kernel32.SetThreadPriority(handle, 2)
             ctypes.windll.kernel32.CloseHandle(handle)
         except Exception:
-            pass  # Non-Windows or permission denied — acceptable
+            pass
         logger.info("BrainEngine acquisition started.")
 
     def stop(self) -> None:
-        """Signal acquisition thread to stop and release device."""
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=3.0)
@@ -465,43 +568,36 @@ class BrainEngine:
         logger.info("BrainEngine stopped.")
 
     def check_health(self) -> None:
-        """Raise if acquisition thread encountered a fatal error."""
         if self._acq_error is not None:
             raise self._acq_error
 
-    # ── Acquisition Loop ───────────────────────────────────────────────────────
-
     def _acquisition_loop(self) -> None:
-        """Acquisition loop — also broadcasts over LSL unless we ARE an LSL receiver."""
-
-        # Only create a broadcast outlet when we are the source (Real or Mock device).
-        # If we are already consuming an LSL stream (LSLUnicorn), do not re-broadcast
-        # — that would just echo the signal back onto the network under the same name.
         outlet = None
         if not isinstance(self._device, LSLUnicorn):
+            # Transmitimos 15 canales: 8 EEG + 3 Acc + 3 Gyro + 1 Battery
             info = StreamInfo(
                 name='Unicorn_EEG',
-                type='EEG',
-                channel_count=N_CHANNELS,
+                type='Multimodal',
+                channel_count=LSL_TOTAL_COLS,
                 nominal_srate=SAMPLE_RATE,
                 channel_format='float32',
                 source_id=self._device.serial if hasattr(self._device, 'serial') else 'soude_mock',
             )
             outlet = StreamOutlet(info)
-            logger.info("LSL broadcast started — other machines can now listen.")
+            logger.info("LSL broadcast started with %d channels.", LSL_TOTAL_COLS)
 
         consecutive_errors = 0
         while self._running:
             try:
-                # Obtenemos los datos (ej. 4 muestras)
-                samples = self._device.get_data(GETDATA_BLOCK)
+                # Ahora devuelve un UnicornDataPacket normalizado
+                packet: UnicornDataPacket = self._device.get_data(GETDATA_BLOCK)
                 
-                # Store locally in ring buffer
-                self._buffer.write(samples)
+                # Almacena en el búfer circular
+                self._buffer.write_packet(packet)
 
-                # Broadcast over LAN (only when we are the source, not a receiver)
+                # Transmite por LSL
                 if outlet is not None:
-                    outlet.push_chunk(samples.tolist())
+                    outlet.push_chunk(packet.to_matrix().tolist())
                 
                 consecutive_errors = 0
             except RuntimeError as exc:
@@ -514,16 +610,7 @@ class BrainEngine:
                     return
                 time.sleep(0.01)
 
-    # ── Stimulus Marking ───────────────────────────────────────────────────────
-
     def mark_stimulus(self, image_id: int) -> StimulusMarker:
-        """
-        Record the exact ring-buffer position when an image is flashed.
-        Must be called from the UI thread immediately after the screen update.
-
-        Returns the StimulusMarker so the caller can store it if needed.
-        """
-        # Capture buffer write head BEFORE any further samples arrive
         buf_idx = self._buffer.total_written
         ts = time.perf_counter()
 
@@ -535,23 +622,14 @@ class BrainEngine:
         with self._markers_lock:
             self._markers.append(marker)
 
-        # If using mock device, we need to inform it for P300 injection.
-        # is_target is determined later; but we can hook this after set_targets().
         logger.debug("Stimulus marked: id=%d  buf=%d  t=%.6f", image_id, buf_idx, ts)
         return marker
 
-    # ── Marker Management ──────────────────────────────────────────────────────
-
     def set_targets(self, target_ids: list[int]) -> None:
-        """
-        Designate which image_ids are the password (target) images.
-        Must be called before evaluation begins.
-        """
         with self._markers_lock:
             for m in self._markers:
                 m.is_target = m.image_id in target_ids
 
-        # Let MockUnicorn inject P300s retroactively for already-marked targets
         if isinstance(self._device, MockUnicorn):
             with self._markers_lock:
                 for m in self._markers:
@@ -559,26 +637,26 @@ class BrainEngine:
                         self._device.notify_target()
 
     def get_markers(self) -> list[StimulusMarker]:
-        """Return a copy of all recorded stimulus markers."""
         with self._markers_lock:
             return list(self._markers)
 
     def clear_markers(self) -> None:
-        """Discard all recorded markers (call between authentication sessions)."""
         with self._markers_lock:
             self._markers.clear()
 
-    # ── Data Access ────────────────────────────────────────────────────────────
-
     def get_epoch(self, marker: StimulusMarker, duration_s: float = 0.8) -> Optional[np.ndarray]:
         """
-        Extract a single epoch starting at marker.buffer_index.
-        Returns (n_samples, N_CHANNELS) or None if data is no longer in buffer.
+        Retorna la ventana EEG correspondiente a un marcador (n_samples, 8)
+        manteniendo compatibilidad con el pipeline de clasificación P300.
         """
+        n_samples = int(duration_s * SAMPLE_RATE)
+        return self._buffer.read_eeg_from(marker.buffer_index, n_samples)
+
+    def get_epoch_packet(self, marker: StimulusMarker, duration_s: float = 0.8) -> Optional[UnicornDataPacket]:
+        """Retorna el paquete completo (EEG + Kinematics + Battery) para un marcador dado."""
         n_samples = int(duration_s * SAMPLE_RATE)
         return self._buffer.read_from(marker.buffer_index, n_samples)
 
     @property
     def buffer(self) -> RingBuffer:
-        """Direct access to the ring buffer (e.g. for live visualisers)."""
         return self._buffer

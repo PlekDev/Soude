@@ -6,3 +6,5 @@ pandas
 scikit-learn
 python-dotenv
 pytest
+dotenv
+pyserial

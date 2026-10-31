@@ -103,6 +103,12 @@ class StimulusRunner:
         Non-target IDs are everything in [0, total_images) not in target_ids.
         """
         cfg = self._config
+        
+        # Validación de seguridad: evitar IDs fuera de rango
+        invalid = [t for t in target_ids if t >= cfg.total_images or t < 0]
+        if invalid:
+            raise ValueError(f"Target IDs {invalid} are out of range [0, {cfg.total_images-1}]")
+            
         self._target_ids = list(target_ids)
         all_ids = list(range(cfg.total_images))
         self._nontarget_ids = [i for i in all_ids if i not in target_ids]
@@ -241,25 +247,33 @@ class StimulusRunner:
 
     @property
     def total_duration_s(self) -> float:
+        """Calculates theoretical duration independent of target assignment state."""
         cfg = self._config
-        n = len(self._target_ids) * cfg.target_repeats + \
-            len(self._nontarget_ids) * cfg.nontarget_repeats
-        return n * (cfg.soa_s + cfg.blank_s)
+        n_targets = cfg.n_targets
+        n_nontargets = cfg.total_images - cfg.n_targets
+        
+        n_events = (n_targets * cfg.target_repeats) + (n_nontargets * cfg.nontarget_repeats)
+        return n_events * (cfg.soa_s + cfg.blank_s)
 
+
+# ── Precision Timing Helper ────────────────────────────────────────────────────
 
 # ── Precision Timing Helper ────────────────────────────────────────────────────
 
 def _precise_wait_until(target_t: float) -> None:
     """
     Busy-wait until perf_counter() >= target_t.
-    Sleeps for the bulk of the wait, then spins for the final 15 ms.
-    15 ms spin (vs 2 ms) ensures we are already spinning before the Windows
-    scheduler quantum (~15.6 ms) can preempt us and cause a late wake.
+    Sleeps for the bulk of the wait, then spins for the final 20 ms.
+    A 20 ms spin ensures we absorb the Windows scheduler quantum (~15.6 ms),
+    guaranteeing we never accidentally sleep past the target time.
     """
-    sleep_until = target_t - 0.015   # sleep until 15 ms before target
+    spin_window = 0.020  # 20 ms
     now = time.perf_counter()
-    if now < sleep_until:
-        time.sleep(sleep_until - now)
+    
+    # Solo dormimos si falta más de un quantum de SO
+    if target_t - now > spin_window:
+        time.sleep((target_t - now) - spin_window)
+        
     # Final high-precision spin
     while time.perf_counter() < target_t:
         pass

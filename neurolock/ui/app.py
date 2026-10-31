@@ -425,7 +425,7 @@ class LiveSignalVisualizerWidget(QWidget):
             n     = self.N_SAMPLES
             if total < n:
                 return
-            data = buf.read_from(total - n, n)
+            data = buf.read_eeg_from(total - n, n)
             if data is not None:
                 self._data = data
                 self.update()
@@ -1442,6 +1442,7 @@ class MainWindow(QMainWindow):
     def _update_signal_quality(self):
         try:
             snap = self._engine.buffer.snapshot()
+            snap = snap.eeg
             report = self._impedance_checker.check(snap)
             self._home_screen.update_signal_quality(report)
         except Exception as exc:

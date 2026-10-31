@@ -46,10 +46,12 @@ def main() -> None:
     try:
         while True:
             engine.check_health()
-            snap = engine.buffer.snapshot()
-            last = snap[-1]
-            print(" | ".join(f"{name}: {v:8.2f}" for name, v in zip(CHANNEL_NAMES, last)))
-            time.sleep(args.interval)
+            packet = engine.buffer.snapshot()
+            last_eeg = packet.eeg[-1]
+            last_batt = packet.battery[-1]
+            
+            eeg_str = " | ".join(f"{name}: {v:8.2f}" for name, v in zip(CHANNEL_NAMES, last_eeg))
+            print(f"[Bat: {last_batt:3.0f}%] {eeg_str}")
     except KeyboardInterrupt:
         print("\nDetenido.")
     finally:

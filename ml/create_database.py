@@ -82,7 +82,7 @@ def collect_data(use_mock: bool = False) -> None:
                 while engine.buffer.total_written < target_index:
                     time.sleep(0.005)
 
-                raw = engine.buffer.read_from(last_read_index, SAMPLES_PER_WINDOW)
+                raw = engine.buffer.read_eeg_from(last_read_index, SAMPLES_PER_WINDOW)
                 last_read_index += SAMPLES_PER_WINDOW
                 attempts += 1
 

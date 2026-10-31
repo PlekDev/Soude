@@ -126,14 +126,12 @@ def baseline_correct(epoch: np.ndarray, baseline_samples: int = BASELINE_SAMPLES
 # ── Artifact Rejection ─────────────────────────────────────────────────────────
 
 def is_artifact(epoch: np.ndarray, threshold_uv: float = 100.0) -> bool:
-    """
-    Reject epoch if any channel exceeds threshold_uv peak-to-peak.
-    After bandpass filtering (1–10 Hz), genuine EEG should be 10–100 µV p-p.
-    Artifacts from poor contact, cable movement, or mains interference appear
-    as bursts well above 100 µV and must be rejected.
-    Typical blink artifact: >150 µV on frontal channels.
-    """
-    pp = epoch.max(axis=0) - epoch.min(axis=0)
+    # Evitar crash si la señal trae NaNs por cortes de telemetría
+    if np.isnan(epoch).any():
+        logger.warning("Artifact rejected: NaN values detected in epoch")
+        return True
+        
+    pp = np.nanmax(epoch, axis=0) - np.nanmin(epoch, axis=0)
     worst = float(pp.max())
     if worst > threshold_uv:
         logger.warning("Artifact rejected: peak-to-peak %.1f µV > %.0f µV threshold", worst, threshold_uv)
@@ -177,7 +175,7 @@ class EpochExtractor:
             logger.warning("Epoch id=%d not yet complete: need %d samples, have %d.", marker.image_id, end_index, self._engine.buffer.total_written)
             return None
 
-        raw = self._engine.buffer.read_from(start_index, total_samples)
+        raw = self._engine.buffer.read_eeg_from(start_index, total_samples)
         if raw is None:
             logger.warning("Epoch id=%d unavailable (buffer overrun).", marker.image_id)
             return None
@@ -245,10 +243,13 @@ class SignalAverager:
 # ── P300 Detector ──────────────────────────────────────────────────────────────
 
 def compute_snr_db(target_peak: float, nontarget_peak: float, noise_std: float) -> float:
-    """Signal-to-noise ratio in dB.  noise_std from non-target variability."""
-    signal_power = (target_peak - nontarget_peak) ** 2
-    if signal_power <= 0.0:
-        return -99.0   # identical averages → no signal; avoid log10(0) = -inf
+    """Signal-to-noise ratio in dB. noise_std from non-target variability."""
+    delta = target_peak - nontarget_peak
+    # Si la diferencia es negativa o nula, el SNR del P300 (que debe ser positivo) es inexistente.
+    if delta <= 0.0:
+        return -99.0
+        1
+    signal_power = delta ** 2
     noise_power = max(noise_std ** 2, 1e-9)
     return float(10.0 * np.log10(signal_power / noise_power))
 

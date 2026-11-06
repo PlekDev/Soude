@@ -1,274 +1,186 @@
- # SECURITY.md
+# SECURITY.md (v2)
 
-## 1. Objetivo
+Documento de seguridad de Soude, sistema de autenticación basada en EEG (P300). Cada control tiene un estado:
 
-Este documento define la estrategia de seguridad para Soude como sistema de autenticación biométrica basado en señales EEG. Su propósito es proteger la identidad del usuario, los perfiles biométricos, la información de sesión y la integridad del flujo de autenticación.
+- **[P]** implementado y verificable en el código del artículo
+- **[E]** esqueleto con interfaz y pruebas de contrato, sin lógica completa
+- **[F]** diseño o trabajo futuro, no implementado
 
-Soude no debe tratar la señal cerebral como un dato inocuo. La EEG contiene evidencia altamente sensible de identidad y comportamiento cognitivo, por lo que debe manejarse con controles de acceso, cifrado, trazabilidad y aislamiento de datos.
-
----
-
-## 2. Estado actual del proyecto desde la perspectiva de seguridad
-
-El proyecto actual ya incorpora captura EEG, procesamiento de epochs y registro de sesiones con métricas de autenticación. Sin embargo, la seguridad actual todavía se encuentra en un nivel de prototipo:
-
-- las sesiones se almacenan en `logs/<timestamp>/` con señales, epochs y resultados;
-- no existe una base de perfiles biométricos por usuario;
-- no existe un vault ni un esquema de cifrado para plantillas o referencias de autenticación;
-- no hay separación formal entre identidad, biometría y evidencias técnicas;
-- el sistema guarda evidencia analítica sensible sin distinguir entre producción, validación y análisis de desarrollo;
-- la decisión final se basa en un umbral de amplitud, sin un modelo probabilístico ni una política de riesgo por sesión.
-
-Esto implica que el proyecto ya tiene capacidad técnica de adquisición y análisis, pero aún no dispone de la capa de control de riesgo, gestión de identidad y protección de datos que exige un sistema biométrico real.
+Este documento debe mantenerse consistente con `PLAN_REDISEÑO_SOUDE_v3.md` y con el protocolo de ética (`PROTOCOLO_EXPERIMENTAL_SOUDE.md`). Si uno cambia, los otros se revisan.
 
 ---
 
-## 3. Principios de seguridad
+## 1. Objetivo y alcance
 
-### 2.1. Minimización de datos
+Proteger la identidad del usuario, sus plantillas biométricas, los registros de sesión y la integridad del flujo de autenticación.
 
-Se debe recopilar únicamente la información estrictamente necesaria para:
+La EEG y las respuestas cognitivas se tratan como **datos personales sensibles**. Aun pseudonimizados, pueden conservar riesgo de reidentificación, y así se informa a los participantes.
 
-- enrolamiento biométrico;
-- validación de autenticación;
-- diagnóstico técnico de calidad de señal;
-- auditoría y análisis forense interno.
-
-No se deben almacenar datos innecesarios ni copias redundantes de señales sin necesidad operacional.
-
-### 2.2. Separación de dominios
-
-Los datos deben dividirse en:
-
-1. Datos de identidad del usuario
-2. Datos biométricos y plantillas
-3. Datos de sesión y evidencias técnicas
-4. Datos de análisis y entrenamiento
-
-Cada dominio debe tener permisos y acceso distintos. Nunca deben mezclarse criterios de producción con bases de prueba o artefactos de investigación sin control.
-
-### 2.3. No almacenamiento de secretos en texto plano
-
-- no se debe guardar ninguna plantilla biométrica en formato legible;
-- no se debe persistir la contraseña mental de forma equivalente a texto plano;
-- no deben crearse archivos de sesión con valores sensibles en formato fácilmente extraíble;
-- cualquier token, secreto o clave de acceso debe almacenarse en mecanismo seguro con cifrado y rotación.
-
-### 2.4. Cifrado por defecto
-
-Todo dato persistente sensible debe estar cifrado en reposo. En caso de almacenamiento local o en archivos, se recomienda:
-
-- cifrado AES-256 o equivalente;
-- claves gestionadas fuera del repositorio;
-- rotación periódica de credenciales;
-- separación entre la identidad del usuario y la clave de cifrado.
+**Fuera de alcance de esta versión:** despliegue comercial, certificación de seguridad, y evaluación empírica de ataques sofisticados de inyección o replay (solo se evalúa un replay básico, ver 4.3).
 
 ---
 
-## 4. Activos de seguridad
+## 2. Modos de operación
 
-### 3.1. Datos altamente sensibles
+| Modo | Uso | Datos | Controles |
+|---|---|---|---|
+| Desarrollo | Pruebas con simulador y datos sintéticos | Sintéticos únicamente | Sin datos reales en el repositorio |
+| Investigación | Recolección con participantes bajo protocolo aprobado | EEG pseudonimizado, en volumen cifrado | Todo lo marcado [P] |
+| Despliegue | Uso real fuera de estudio | Plantillas cifradas, sin EEG crudo por defecto | Requiere implementar los controles [E] y [F] antes de usarse |
 
-- EEG cruda y epochs de autenticación
-- plantillas biométricas del usuario
-- metadata de identidad asociada a la sesión
-- scores de autenticación y decisiones finales
-- historial de validaciones e intentos de acceso
-
-### 3.2. Datos moderadamente sensibles
-
-- parámetros de configuración del protocolo
-- decisiones internas del pipeline
-- métricas de calidad por canal
-- registros de operación y análisis
-
-### 3.3. Datos no sensibles operativos
-
-- configuración general del software
-- métricas de rendimiento no vinculadas a la identidad del usuario
-- datos de diagnóstico de laboratorio o simulación
+El modo investigación **sí guarda EEG** (lo exige el análisis), y el modo despliegue no debería. Ambos modos no deben compartir directorio ni claves.
 
 ---
 
-## 5. Amenazas relevantes
+## 3. Modelo de amenazas
 
-### 4.1. Suplantación de identidad
+| ID | Amenaza | Qué protege el sistema | Estado |
+|---|---|---|---|
+| T1 | Impostor que **no conoce** la contraseña mental | Factor de conocimiento (P300 a los símbolos correctos) | [P] evaluado en el estudio |
+| T2 | Impostor que **conoce y atiende** la contraseña | Factor biométrico (plantilla de respuesta) | [P] evaluado; protección **limitada y medida**, no garantizada |
+| T3 | Replay de EEG, inyección de señal sintética o manipulación de marcadores | Integridad del flujo | [P] mitigaciones básicas; [F] evaluación empírica completa |
+| T4 | Robo de plantillas o de datos de sesión en reposo | Confidencialidad | [P] cifrado en reposo y separación de identidad |
+| T5 | Acceso no autorizado de personal o colaboradores | Confidencialidad, trazabilidad | [P] acceso mínimo por proceso; [E] roles y auditoría |
+| T6 | Señal de mala calidad (ruido, fatiga, mala colocación) usada para forzar o degradar una decisión | Robustez | [P] compuerta de calidad |
 
-Un atacante podría intentar:
+**Limitaciones que se reconocen explícitamente:**
 
-- reproducir un patrón visual sin autenticar de verdad;
-- manipular la señal o los marcadores para producir una decisión falsa;
-- inyectar un flujo de EEG sintético para engañar al sistema.
-
-Mitigación:
-
-- validar calidad de señal antes de aceptar decisión;
-- usar comparación biométrica con plantilla del usuario;
-- aplicar una decisión probabilística con umbrales de confianza;
-- requerir evidencia suficiente antes de conceder acceso.
-
-### 4.2. Robo de plantillas biométricas
-
-Si la plantilla de EEG o el template de usuario se expone, el atacante podría reutilizarlo para autenticación fraudulenta.
-
-Mitigación:
-
-- cifrado fuerte en reposo;
-- almacenamiento separado de identidad y biometría;
-- limitación de acceso por rol;
-- hashes o derivaciones irreversibles para referencias internas.
-
-### 4.3. Manipulación de marcadores o timestamps
-
-Un atacante podría alterar tiempos de estímulo o desalinear la señal con marcadores para producir alucinación de P300 o forzar aceptación.
-
-Mitigación:
-
-- validar la sincronía entre señales y eventos;
-- registrar marcas con timestamps de origen;
-- difundir checks de integridad del flujo LSL;
-- guardar evidencias para auditoría posterior.
-
-### 4.4. Ataques por ruido o artefactos
-
-Se puede intentar forzar una decisión con ruido, movimiento, fatiga o mala colocación del electrodos.
-
-Mitigación:
-
-- análisis de calidad por canal;
-- rechazo automático de artefactos;
-- reintento recomendado si la sesión no cumple calidad mínima;
-- no aceptar sesion ambigua.
+- Un impostor informado puede producir un P300. La plantilla biométrica reduce, pero no elimina, esa aceptación; el estudio mide cuánto.
+- La plantilla de EEG no se puede revocar como una contraseña. Una plantilla filtrada es un problema permanente para esa persona. Por eso se cifra y se limita su vida útil; la protección con comparación sin descifrar es [F].
+- El EEG es un dato biométrico y puede permitir reidentificación, aun sin nombre.
 
 ---
 
-## 6. Controles de seguridad obligatorios
+## 4. Controles
 
-### 5.1. Control de acceso
+### 4.1. Separación de dominios de datos
 
-- acceso mínimo necesario por usuario y rol;
-- permisos diferenciados para desarrollo, validación y producción;
-- registro de accesos y acciones relevantes;
-- bloqueo tras intentos fallidos o acceso sospechoso.
+| Dominio | Contenido | Ubicación | Estado |
+|---|---|---|---|
+| Identidad | Nombre, correo, tabla de enlace código↔persona | Volumen cifrado independiente, otra clave, otro medio | [P] (procedimiento), fuera del software |
+| Biometría | Plantillas, parámetros de modelo | Almacén cifrado de Soude | [P] |
+| Sesión | EEG, marcadores, calidad, decisiones | `SOUDE_DATA_DIR` (volumen cifrado, **fuera del repositorio**) | [P] |
+| Análisis | Tablas y figuras agregadas | Repositorio, solo resultados agregados o sintéticos | [P] |
 
-### 5.2. Integridad del pipeline
+Datos de desarrollo, validación y producción no comparten almacén.
 
-- guardar metadatos de versión del algoritmo;
-- registrar configuración del protocolo por sesión;
-- versionar plantillas, modelos y reglas de autenticación;
-- impedir modificaciones silenciosas en la definición del modelo.
+### 4.2. Cifrado y gestión de claves
 
-### 5.3. Rechazo seguro
+- Cifrado autenticado **AES-256-GCM** (biblioteca `cryptography`) para plantillas y la lista de imágenes objetivo. Nonce aleatorio de 96 bits por archivo y datos asociados (`subject_id`, versión) para ligar el cifrado al contexto. [P]
+- Claves **fuera del repositorio**: llavero del sistema o variable de entorno, nunca en código ni en `.env` versionado. [P]
+- `.gitignore` y detección de secretos en *pre-commit* y CI. [P]
+- Rotación periódica de claves y bóveda de secretos. [E]
+- Cifrado de disco/volumen para `SOUDE_DATA_DIR` según protocolo. [P] (procedimiento)
 
-La política de decisión debe ser conservadora:
+### 4.3. Integridad del flujo y anti-replay
 
-- si la confianza es baja, se rechaza;
-- si la calidad de la señal es insuficiente, se rechaza;
-- si la evidencia es ambigua, se exige re-challenge o segunda validación.
+- Validación de stream: existencia, número de canales, frecuencia de muestreo, timestamps monótonos, huecos de datos. [P]
+- Medición de jitter y latencia entre marcador y muestra, con rechazo si excede la tolerancia. [P]
+- **Secuencia de estimulación aleatoria por intento**, generada con un generador criptográfico (`secrets`) y registrada en la sesión. Un registro reproducido tendría una secuencia distinta a la del intento actual y no coincidiría. [P]
+- Detección de duplicados: se calcula un hash de las épocas y marcadores de cada sesión, y se rechaza un intento cuyo contenido coincida con una sesión previa. [P]
+- Sincronización multi-stream (cuatro streams LSL). [E]
+- Evaluación empírica de replay con señales sintéticas más sofisticadas. [F]
 
-El sistema debe preferir seguridad sobre comodidad.
+### 4.4. Compuerta de calidad y rechazo seguro
 
-### 5.4. Registro forense
+La política de decisión prioriza seguridad sobre comodidad:
 
-Cada sesión debe incluir:
+- Calidad de señal insuficiente → `RETRY` (no se decide).
+- Evidencia ambigua → `CONTINUE` hasta un máximo de repeticiones; si sigue ambigua → `REJECT`.
+- Confianza baja → `REJECT`.
+- Sesión con sincronía inválida → no se emite decisión de aceptación.
 
-- ID del usuario o intento;
-- timestamp del evento;
-- metadata del dispositivo;
-- calidad por canal;
-- lista de marcadores y epochs;
-- score final y decisión;
-- versión del modelo y del algoritmo de decisión.
+Los umbrales se fijan antes de la recolección y no se ajustan con los resultados de prueba. [P]
 
-Esto permite reconstruir la autenticación e investigar incidentes.
+Bloqueo tras intentos fallidos consecutivos (límite por usuario y ventana de tiempo). [E]
 
----
+### 4.5. Manejo del secreto (contraseña mental) y de la plantilla
 
-## 7. Seguridad del almacenamiento
+- La lista de imágenes objetivo se guarda **cifrada**, no hasheada, porque el sistema necesita conocer cuáles son para etiquetar épocas. Se descifra solo en memoria durante la sesión. [P]
+- La plantilla biométrica se guarda cifrada y se descifra en memoria solo durante la comparación. Un hash no sirve aquí, porque la comparación biométrica es por similitud y no por igualdad exacta. [P]
+- Ni el secreto ni la plantilla aparecen en registros de depuración ni en mensajes de error. [P]
+- Protección de plantilla con biometría cancelable o comparación en dominio cifrado. [F]
+- Actualización de plantilla por *drift*. [E/F]
 
-### 6.1. Persistencia de plantillas
+### 4.6. Control de acceso y trazabilidad
 
-Las plantillas biométricas deben almacenarse en una capa de datos separada, con:
+- Principio de menor privilegio: el proceso de análisis no necesita acceso a la tabla de enlace; el software de adquisición no necesita acceso a las plantillas de otros. [P] (separación por almacén)
+- Roles (investigador, operador, desarrollador, auditor) y permisos por módulo. [E]
+- Registro de auditoría a prueba de manipulación (cadena de hashes). [E]
+- Registro de decisiones con versión de software, modelo y plantilla, y calidad por canal, para reconstruir cualquier decisión. [P]
 
-- cifrado en reposo;
-- control de acceso explícito;
-- políticas de retención claras;
-- hash de identidad para soporte de auditoría sin revelar datos sensibles.
+### 4.7. Retención y borrado
 
-### 6.2. Sesiones y logs
-
-Las sesiones deben almacenarse en un almacenamiento protegido con:
-
-- organización por ID de sesión;
-- ACLs puntuales;
-- políticas de eliminación y archivo;
-- separación de `raw`, `processed`, `audit` y `reports`.
-
-### 6.3. Datos de entrenamiento
-
-Los datos de benchmarking o entrenamiento no deben mezclarse con perfiles de usuarios reales. Debe existir una separación clara entre:
-
-- data de investigación,
-- data de validación,
-- data de producción.
+- Tabla de enlace: destruida a más tardar [6 meses] después de la publicación, según protocolo. [P] (procedimiento)
+- EEG pseudonimizado: retención [X años] y borrado seguro después. [P] (procedimiento)
+- Borrado programado automático. [E]
+- Copias temporales y exportaciones minimizadas; sin envío por correo ni a nube pública. [P] (procedimiento)
 
 ---
 
-## 8. Seguridad del flujo de adquisición y LSL
+## 5. Privacidad y cumplimiento
 
-### 7.1. Validación de stream
-
-Antes de aceptar un stream, el sistema debe comprobar:
-
-- que el stream exista;
-- que la cantidad de canales sea la esperada;
-- que los timestamps sean consistentes;
-- que la frecuencia de muestreo sea compatible;
-- que no haya pérdida importante de datos.
-
-### 7.2. Tolerancia a manipulación
-
-- no aceptar streams sin metadatos mínimos;
-- marcar una sesión como sospechosa si el flujo presenta latencia irregular o pérdida repetida;
-- invalidar decisiones si la sincronía marca inconsistencia.
+- Minimización: solo se recolectan los datos listados en el protocolo (EEG, marcadores, edad, sexo, lateralidad, contacto).
+- Consentimiento informado con advertencia explícita sobre el riesgo de reidentificación del EEG.
+- Los resultados se publican de forma agregada; los datos crudos no se comparten sin nueva autorización del comité y consentimiento adicional.
+- Normativa aplicable en México y requisitos de aviso de privacidad: **verificar con el comité o asesoría legal de la escuela**. Este documento no sustituye esa revisión.
 
 ---
 
-## 9. Política de privacidad y cumplimiento
+## 6. Gestión de incidentes (versión de investigación)
 
-El sistema debe asumir que la EEG y los patrones de respuesta cognitiva son información personal altamente sensible. En consecuencia:
+**Eventos que se tratan como incidente:** pérdida o robo de equipo o medio con datos, acceso no autorizado a datos de sesión o a la tabla de enlace, exfiltración de plantillas, alteración del flujo de adquisición o de una sesión, subida accidental de datos reales al repositorio.
 
-- restringir acceso a usuarios autorizados;
-- evitar compartir sesiones con terceros sin consentimiento y control formal;
-- descartar o limitar copias temporales;
-- documentar retención, uso y riesgos asociados al tratamiento de datos biométricos.
+**Procedimiento mínimo:**
 
----
+1. Contener: aislar el equipo o cuenta afectada y revocar claves si aplica.
+2. Preservar evidencia: no borrar registros, hacer copia forense cifrada.
+3. Notificar al investigador principal y al asesor de inmediato, y al comité de ética según sus reglas.
+4. Evaluar el impacto: qué participantes y qué datos.
+5. Informar a los participantes afectados si procede y remediar.
+6. Documentar causa raíz y acciones correctivas.
 
-## 10. Política de incidentes
-
-### 9.1. Eventos críticos
-
-Se deben reportar como incidentes y gestionar con prioridad:
-
-- pérdida o exfiltración de plantillas biométricas;
-- manipulación de sesiones de autenticación;
-- alteración de timestamps o flujo LSL;
-- acceso no autorizado a datos de sesión;
-- vulneración del modelo o de una política de seguridad.
-
-### 9.2. Procedimiento mínimo
-
-1. aislar el componente afectado;
-2. congelar y guardar evidencia;
-3. revisar integridad del flujo de autenticación;
-4. invalidar plantillas o sesiones comprometidas;
-5. documentar el incidente y remediar la causa raíz.
+Si se sube un dato real al repositorio por error, se considera expuesto aunque se borre del último *commit*: se reescribe el historial, se rotan las claves y se notifica.
 
 ---
 
-## 11. Recomendación final de seguridad
+## 7. Verificación
 
-Soude no puede ser una solución de autenticación cerrada sobre un repositorio sin controles de seguridad. Su valor y su riesgo están en la señal cerebral: no es solo un dato técnico, sino una huella biométrica. Por ello, la implementación debe asumir una política de seguridad rigurosa, con cifrado, separación de dominios, trazabilidad, rechazo de calidad insuficiente y toma de decisiones conservadora.
+Cada control [P] debe tener una prueba o un procedimiento comprobable:
 
-La seguridad no debe considerarse como una capa final; debe ser un principio arquitectónico desde la adquisición hasta la decisión final de autenticación.
+| Control | Verificación |
+|---|---|
+| Cifrado AES-GCM | Test: alterar un byte del archivo produce error de autenticación; ida y vuelta exacta |
+| Claves fuera del repo | Escaneo de secretos en CI; test que falla si hay claves o listas de objetivos en texto plano |
+| Datos fuera del repo | `.gitignore` y comprobación en CI de que no hay EEG ni sesiones reales versionados |
+| Compuerta de calidad | Tests con ruido, canal desconectado y marcadores desalineados |
+| Validación de sincronía | Test con timestamps no monótonos, huecos y jitter alto |
+| Anti-replay básico | Test: reenviar una sesión previa es rechazado por secuencia o por hash duplicado |
+| Rechazo seguro | Tests de política: calidad baja → `RETRY`; ambigüedad persistente → `REJECT` |
+| Registro de decisiones | Una sesión se puede reconstruir completa desde sus archivos de metadatos |
+| Separación de identidad | Revisión manual: los archivos de sesión no contienen nombre ni correo |
+
+---
+
+## 8. Resumen de estado
+
+| Control | Estado |
+|---|---|
+| Cifrado de plantilla y objetivos (AES-256-GCM), clave externa | [P] |
+| Pseudonimización y separación de dominios | [P] |
+| Compuerta de calidad y rechazo seguro | [P] |
+| Validación de stream, jitter, secuencia aleatoria, detección de duplicados | [P] |
+| Registro de decisiones con versión de modelo | [P] |
+| Bóveda y rotación de claves | [E] |
+| Roles, bloqueo por intentos, auditoría a prueba de manipulación | [E] |
+| Retención y borrado automático | [E] |
+| Multi-stream LSL | [E] |
+| Biometría cancelable y plantilla revocable | [F] |
+| Evaluación empírica avanzada de replay e inyección | [F] |
+| Certificación y evaluación de despliegue | [F] |
+
+---
+
+## 9. Principio rector
+
+La seguridad no es una capa final: se decide desde la adquisición hasta la decisión. En este proyecto cada control se declara con su estado real y su forma de verificarse, y lo que todavía no está implementado se dice como tal.
